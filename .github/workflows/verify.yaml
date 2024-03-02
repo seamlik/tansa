@@ -1,0 +1,24 @@
+on:
+  - push
+  - pull_request
+jobs:
+  main:
+    runs-on: ubuntu-22.04
+    steps:
+      # Setup
+      - uses: actions/checkout@v4
+      - uses: seamlik/devops/.github/actions/cache-nodejs@master
+      - run: npm install --global prettier
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: seamlik/devops/.github/actions/install-devops@master
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Verify
+      - run: cargo test
+      - run: devops format rust yaml markdown protobuf
+      - uses: seamlik/devops/.github/actions/check-formatting@master
+      - uses: bufbuild/buf-lint-action@v1

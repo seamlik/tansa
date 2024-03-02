@@ -1,0 +1,8 @@
+[workspace]
+members = ["protocol/rust"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+publish = false
+version = "0.1.0"

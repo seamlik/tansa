@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package tw.seamlik.tansa.v1;
+
+import "tw/seamlik/tansa/v1/socket_address.proto";
+
+message Response {
+  bytes request_id = 1;
+  bytes response_id = 2;
+  SocketAddress service_address = 3;
+}

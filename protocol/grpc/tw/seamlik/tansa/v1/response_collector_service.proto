@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package tw.seamlik.tansa.v1;
+
+import "google/protobuf/empty.proto";
+import "tw/seamlik/tansa/v1/response.proto";
+
+service ResponseCollectorService {
+  rpc SubmitResponse(Response) returns (google.protobuf.Empty) {}
+}
