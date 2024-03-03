@@ -18,7 +18,9 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Verify
-      - run: cargo test
+      - uses: seamlik/devops/.github/actions/upload-codecov@master
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       - run: devops format rust yaml markdown protobuf
       - uses: seamlik/devops/.github/actions/check-formatting@master
       - uses: bufbuild/buf-lint-action@v1
