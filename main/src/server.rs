@@ -85,10 +85,10 @@ mod test {
 
     #[tokio::test]
     async fn find_local_ip() -> anyhow::Result<()> {
-        let cloudflare_dns_ip = "2606:4700:4700::1111".parse()?;
+        let localhost = "::1".parse()?;
 
         // When
-        let local_ip = find_local_ip_for_remote_ip(cloudflare_dns_ip).await?;
+        let local_ip = find_local_ip_for_remote_ip(localhost).await?;
 
         // Then
         assert_ne!(local_ip, Ipv6Addr::UNSPECIFIED);
