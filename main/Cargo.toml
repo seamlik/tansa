@@ -1,0 +1,18 @@
+[package]
+edition.workspace = true
+name = "tansa"
+publish.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+prost = "0.12"
+socket2 = "0.5"
+tansa-protocol = { path = "../protocol/rust" }
+tokio = "1"
+tonic = "0.11"
+uuid = { version = "1", features = ["v4"]}
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros"] }
