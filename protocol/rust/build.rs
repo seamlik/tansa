@@ -1,3 +1,7 @@
 fn main() -> std::io::Result<()> {
-    tonic_build::configure().compile(&["../grpc/tw/seamlik/tansa/v1/*.proto"], &["../grpc"])
+    let protos: Vec<_> = ["response_collector_service", "request"]
+        .into_iter()
+        .map(|name| format!("../grpc/tw/seamlik/tansa/v1/{}.proto", name))
+        .collect();
+    tonic_build::configure().compile(&protos, &["../grpc"])
 }
