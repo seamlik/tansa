@@ -1,0 +1,5 @@
+shape: sequence_diagram
+
+Scanner -> Multicast Address: Send request
+Multicast Address -> Server: Broadcast request
+Server -> Scanner: Submit response via gRPC
