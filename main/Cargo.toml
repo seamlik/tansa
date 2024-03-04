@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 anyhow = "1"
 log = "0.4"
+mockall = "0.12"
 prost = "0.12"
 socket2 = "0.5"
 tansa-protocol = { path = "../protocol/rust" }
