@@ -1,8 +1,0 @@
-syntax = "proto3";
-
-package tw.seamlik.tansa.v1;
-
-message SocketAddress {
-  bytes ipv6 = 1;
-  uint32 port = 2;
-}

@@ -6,8 +6,6 @@ use std::net::SocketAddrV6;
 use tansa_protocol::response_collector_service_client::ResponseCollectorServiceClient;
 use tansa_protocol::Request;
 use tansa_protocol::Response;
-use tansa_protocol::SocketAddress;
-use tokio::net::UdpSocket;
 use tonic::IntoRequest;
 use uuid::Uuid;
 
@@ -42,7 +40,6 @@ async fn handle_packet(
     let request = Request::decode(packet.as_slice())?;
     let response_collector_address =
         format!("http://{}:{}", remote_ip, request.response_collector_port);
-    let local_service_ip = find_local_ip_for_remote_ip(remote_ip).await?;
     log::info!(
         "Connecting to response collector at {}",
         &response_collector_address
@@ -52,10 +49,7 @@ async fn handle_packet(
     let response = Response {
         request_id: request.request_id,
         response_id: Uuid::new_v4().into_bytes().into(),
-        service_address: Some(SocketAddress {
-            ipv6: local_service_ip.octets().into(),
-            port: local_service_port.into(),
-        }),
+        port: local_service_port.into(),
     };
     response_collector_client
         .submit_response(response.into_request())
@@ -63,36 +57,10 @@ async fn handle_packet(
     Ok(())
 }
 
-async fn find_local_ip_for_remote_ip(remote_ip: Ipv6Addr) -> std::io::Result<Ipv6Addr> {
-    let socket = UdpSocket::bind("[::]:0").await?;
-    socket
-        .connect(SocketAddrV6::new(remote_ip, 1, 0, 0))
-        .await?;
-    Ok(unwrap_ipv6(socket.local_addr()?.ip()))
-}
-
 fn unwrap_ipv6(ip: IpAddr) -> Ipv6Addr {
     if let IpAddr::V6(ipv6) = ip {
         ipv6
     } else {
         panic!("Must be IPv6")
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[tokio::test]
-    async fn find_local_ip() -> anyhow::Result<()> {
-        let localhost = "::1".parse()?;
-
-        // When
-        let local_ip = find_local_ip_for_remote_ip(localhost).await?;
-
-        // Then
-        assert_ne!(local_ip, Ipv6Addr::UNSPECIFIED);
-
-        Ok(())
     }
 }
