@@ -1,16 +1,16 @@
+use crate::id::IdGenerator;
+use crate::id::UuidGenerator;
 use crate::multicast::MulticastReceiver;
 use crate::multicast::TokioMulticastReceiver;
+use crate::response_sender::GrpcResponseSender;
+use crate::response_sender::ResponseSender;
 use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
-use mockall::automock;
 use prost::Message;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
-use tansa_protocol::response_collector_service_client::ResponseCollectorServiceClient;
 use tansa_protocol::Request;
 use tansa_protocol::Response;
-use tonic::IntoRequest;
-use uuid::Uuid;
 
 pub async fn serve(
     multicast_address: SocketAddrV6,
@@ -34,7 +34,7 @@ async fn serve_internal(
     service_port: u16,
     multicast_receiver: impl MulticastReceiver,
     response_sender: impl ResponseSender,
-    response_id_generator: impl ResponseIdGenerator,
+    response_id_generator: impl IdGenerator,
 ) -> std::io::Result<()> {
     multicast_network_interface_indexes
         .into_iter()
@@ -61,7 +61,7 @@ async fn handle_packet(
     remote_ip: Ipv6Addr,
     local_service_port: u16,
     response_sender: &impl ResponseSender,
-    response_id_generator: &impl ResponseIdGenerator,
+    response_id_generator: &impl IdGenerator,
 ) -> anyhow::Result<()> {
     let request = Request::decode(packet.as_slice())?;
     let response_collector_address =
@@ -80,48 +80,12 @@ async fn handle_packet(
         .await
 }
 
-#[automock]
-trait ResponseIdGenerator {
-    fn generate(&self) -> Vec<u8>;
-}
-
-struct UuidGenerator;
-
-impl ResponseIdGenerator for UuidGenerator {
-    fn generate(&self) -> Vec<u8> {
-        Uuid::new_v4().into_bytes().into()
-    }
-}
-
-#[automock]
-trait ResponseSender {
-    async fn send(
-        &self,
-        response: Response,
-        response_collector_address: String,
-    ) -> anyhow::Result<()>;
-}
-
-struct GrpcResponseSender;
-
-impl ResponseSender for GrpcResponseSender {
-    async fn send(
-        &self,
-        response: Response,
-        response_collector_address: String,
-    ) -> anyhow::Result<()> {
-        ResponseCollectorServiceClient::connect(response_collector_address)
-            .await?
-            .submit_response(response.into_request())
-            .await?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::id::MockIdGenerator;
     use crate::multicast::MockMulticastReceiver;
+    use crate::response_sender::MockResponseSender;
     use mockall::predicate::eq;
     use std::io::ErrorKind;
 
@@ -167,7 +131,7 @@ mod test {
             )
             .return_once(|_, _| Ok(()));
 
-        let mut response_id_generator = MockResponseIdGenerator::default();
+        let mut response_id_generator = MockIdGenerator::default();
         response_id_generator
             .expect_generate()
             .return_const::<Vec<_>>(expected_response.response_id.clone());
@@ -259,12 +223,6 @@ mod test {
 
         // Then
         assert_server_exits_with_dummy_error(result);
-    }
-
-    #[test]
-    fn response_id_has_reasonable_size() {
-        let response_id = UuidGenerator.generate();
-        assert!(response_id.len() <= 16);
     }
 
     fn assert_server_exits_with_dummy_error(result: std::io::Result<()>) {
