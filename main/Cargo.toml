@@ -13,6 +13,7 @@ mockall = "0.12"
 prost = "0.12"
 socket2 = "0.5"
 tansa-protocol = { path = "../protocol/rust" }
+thiserror = "1"
 tokio = "1"
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.11"

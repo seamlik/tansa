@@ -1,3 +1,5 @@
+use futures_util::future::BoxFuture;
+use futures_util::FutureExt;
 use mockall::automock;
 use socket2::Domain;
 use socket2::Socket;
@@ -6,7 +8,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::net::UdpSocket as StdUdpSocket;
-use tokio::net::ToSocketAddrs;
+use std::sync::Arc;
 use tokio::net::UdpSocket;
 
 #[automock]
@@ -70,15 +72,24 @@ impl MulticastReceiver for TokioMulticastReceiver {
     }
 }
 
-#[derive(Default)]
-pub struct MulticastSender;
-
-impl MulticastSender {
-    pub async fn send(
+#[automock]
+pub trait MulticastSender {
+    fn send(
         &self,
         network_interface_index: u32,
-        destination: impl ToSocketAddrs,
-        data: &[u8],
+        destination: SocketAddrV6,
+        data: Arc<[u8]>,
+    ) -> BoxFuture<'static, std::io::Result<()>>;
+}
+
+#[derive(Default)]
+pub struct TokioMulticastSender;
+
+impl TokioMulticastSender {
+    async fn send(
+        network_interface_index: u32,
+        destination: SocketAddrV6,
+        data: Arc<[u8]>,
     ) -> std::io::Result<()> {
         let socket = new_multicast_socket()?;
         socket.set_multicast_if_v6(network_interface_index)?;
@@ -86,8 +97,21 @@ impl MulticastSender {
         let local_ip = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
         socket.bind(&local_ip.into())?;
 
-        new_async_socket(socket)?.send_to(data, destination).await?;
+        new_async_socket(socket)?
+            .send_to(&data, destination)
+            .await?;
         Ok(())
+    }
+}
+
+impl MulticastSender for TokioMulticastSender {
+    fn send(
+        &self,
+        network_interface_index: u32,
+        destination: SocketAddrV6,
+        data: Arc<[u8]>,
+    ) -> BoxFuture<'static, std::io::Result<()>> {
+        Self::send(network_interface_index, destination, data).boxed()
     }
 }
 

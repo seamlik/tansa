@@ -6,6 +6,7 @@ mod server;
 
 use std::net::SocketAddrV6;
 
+pub use scanner::Scanner;
 pub use scanner::Service;
 pub use server::serve;
 
