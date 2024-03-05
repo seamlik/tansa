@@ -1,9 +1,12 @@
 mod multicast;
+mod response_collector;
 mod response_sender;
+mod scanner;
 mod server;
 
 use std::net::SocketAddrV6;
 
+pub use scanner::Service;
 pub use server::serve;
 
 /// IPv6 multicast address used in service discovery.

@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 anyhow = "1"
+futures-channel = "0.3"
 futures-util = "0.3"
 log = "0.4"
 mockall = "0.12"
@@ -13,7 +14,10 @@ prost = "0.12"
 socket2 = "0.5"
 tansa-protocol = { path = "../protocol/rust" }
 tokio = "1"
+tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.11"
+tonic-health = "0.11"
+tower-layer = "0.3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros"] }
