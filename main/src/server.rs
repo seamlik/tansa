@@ -1,5 +1,7 @@
 use crate::multicast::MulticastReceiver;
 use crate::multicast::TokioMulticastReceiver;
+use futures_util::TryFutureExt;
+use futures_util::TryStreamExt;
 use mockall::automock;
 use prost::Message;
 use std::net::Ipv6Addr;
@@ -37,22 +39,21 @@ async fn serve_internal(
     multicast_network_interface_indexes
         .into_iter()
         .try_for_each(|i| multicast_receiver.join_multicast(*multicast_address.ip(), i))?;
-    loop {
-        let (packet, remote_address) = multicast_receiver.receive().await?;
-
-        // TODO: Parallelize
-        if let Err(e) = handle_packet(
+    let receive = |_| async { Some(((multicast_receiver.receive().await), ())) };
+    let handle = |(packet, remote_address): (_, SocketAddrV6)| {
+        handle_packet(
             packet,
             *remote_address.ip(),
             service_port,
             &response_sender,
             &response_id_generator,
         )
+        .inspect_err(|e| log::error!("Failed to handle a packet: {}", e))
+        .or_else(|_| async { Ok(()) })
+    };
+    futures_util::stream::unfold((), receive)
+        .try_for_each_concurrent(0, handle)
         .await
-        {
-            log::error!("Failed to handle a packet from {}: {}", remote_address, e);
-        }
-    }
 }
 
 async fn handle_packet(

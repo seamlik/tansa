@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 anyhow = "1"
+futures-util = "0.3"
 log = "0.4"
 mockall = "0.12"
 prost = "0.12"
