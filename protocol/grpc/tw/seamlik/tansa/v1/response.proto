@@ -3,7 +3,5 @@ syntax = "proto3";
 package tw.seamlik.tansa.v1;
 
 message Response {
-  bytes request_id = 1;
-  bytes response_id = 2;
-  uint32 port = 3;
+  uint32 service_port = 1;
 }

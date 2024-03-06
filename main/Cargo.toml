@@ -14,7 +14,6 @@ socket2 = "0.5"
 tansa-protocol = { path = "../protocol/rust" }
 tokio = "1"
 tonic = "0.11"
-uuid = { version = "1", features = ["v4"]}
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros"] }

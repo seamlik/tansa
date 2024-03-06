@@ -1,5 +1,3 @@
-use crate::id::IdGenerator;
-use crate::id::UuidGenerator;
 use crate::multicast::MulticastReceiver;
 use crate::multicast::TokioMulticastReceiver;
 use crate::response_sender::GrpcResponseSender;
@@ -15,15 +13,16 @@ use tansa_protocol::Response;
 pub async fn serve(
     multicast_address: SocketAddrV6,
     multicast_network_interface_indexes: impl IntoIterator<Item = u32>,
+    service_name: &str,
     service_port: u16,
 ) -> std::io::Result<()> {
     serve_internal(
         multicast_address,
         multicast_network_interface_indexes,
+        service_name,
         service_port,
         TokioMulticastReceiver::new(64, multicast_address.port())?,
         GrpcResponseSender,
-        UuidGenerator,
     )
     .await
 }
@@ -31,10 +30,10 @@ pub async fn serve(
 async fn serve_internal(
     multicast_address: SocketAddrV6,
     multicast_network_interface_indexes: impl IntoIterator<Item = u32>,
+    service_name: &str,
     service_port: u16,
     multicast_receiver: impl MulticastReceiver,
     response_sender: impl ResponseSender,
-    response_id_generator: impl IdGenerator,
 ) -> std::io::Result<()> {
     multicast_network_interface_indexes
         .into_iter()
@@ -44,9 +43,9 @@ async fn serve_internal(
         handle_packet(
             packet,
             *remote_address.ip(),
+            service_name,
             service_port,
             &response_sender,
-            &response_id_generator,
         )
         .inspect_err(|e| log::error!("Failed to handle a packet: {}", e))
         .or_else(|_| async { Ok(()) })
@@ -59,11 +58,18 @@ async fn serve_internal(
 async fn handle_packet(
     packet: Vec<u8>,
     remote_ip: Ipv6Addr,
-    local_service_port: u16,
+    service_name: &str,
+    service_port: u16,
     response_sender: &impl ResponseSender,
-    response_id_generator: &impl IdGenerator,
 ) -> anyhow::Result<()> {
     let request = Request::decode(packet.as_slice())?;
+    if service_name != request.service_name {
+        log::debug!(
+            "Dropping a request for an unknown service: {}",
+            request.service_name
+        );
+        return Ok(());
+    }
     let response_collector_address =
         format!("http://[{}]:{}", remote_ip, request.response_collector_port);
     log::info!(
@@ -71,9 +77,7 @@ async fn handle_packet(
         &response_collector_address
     );
     let response = Response {
-        request_id: request.request_id,
-        response_id: response_id_generator.generate(),
-        port: local_service_port.into(),
+        service_port: service_port.into(),
     };
     response_sender
         .send(response, response_collector_address)
@@ -83,7 +87,6 @@ async fn handle_packet(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::id::MockIdGenerator;
     use crate::multicast::MockMulticastReceiver;
     use crate::response_sender::MockResponseSender;
     use mockall::predicate::eq;
@@ -93,16 +96,12 @@ mod test {
     async fn serve() {
         let multicast_address: SocketAddrV6 = "[::A]:1".parse().unwrap();
         let request = Request {
-            request_id: "REQUEST".into(),
+            service_name: "SERVICE".into(),
             response_collector_port: 3,
         };
         let request_address = "[::123]:2".parse().unwrap();
 
-        let expected_response = Response {
-            request_id: request.request_id.clone(),
-            response_id: "RESPONSE".into(),
-            port: 10,
-        };
+        let expected_response = Response { service_port: 10 };
 
         let mut multicast_receiver = MockMulticastReceiver::default();
         let mut requests = [
@@ -131,19 +130,14 @@ mod test {
             )
             .return_once(|_, _| Ok(()));
 
-        let mut response_id_generator = MockIdGenerator::default();
-        response_id_generator
-            .expect_generate()
-            .return_const::<Vec<_>>(expected_response.response_id.clone());
-
         // when
         let result = serve_internal(
             multicast_address,
             [1, 2],
-            expected_response.port.try_into().unwrap(),
+            &request.service_name,
+            expected_response.service_port.try_into().unwrap(),
             multicast_receiver,
             response_sender,
-            response_id_generator,
         )
         .await;
 
@@ -177,10 +171,10 @@ mod test {
         let result = serve_internal(
             "[::A]:1".parse().unwrap(),
             [1],
+            "",
             1,
             multicast_receiver,
             response_sender,
-            UuidGenerator,
         )
         .await;
 
@@ -214,10 +208,10 @@ mod test {
         let result = serve_internal(
             "[::A]:1".parse().unwrap(),
             [1],
+            "",
             1,
             multicast_receiver,
             response_sender,
-            UuidGenerator,
         )
         .await;
 

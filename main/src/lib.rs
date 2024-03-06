@@ -1,4 +1,3 @@
-mod id;
 mod multicast;
 mod response_sender;
 mod server;

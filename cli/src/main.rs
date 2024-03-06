@@ -11,6 +11,8 @@ use clap::Subcommand;
 /// This scope covers LAN devices routed through VPNs.
 const MULTICAST_ADDRESS: &str = "[FF05::F329:58AF]:50000";
 
+const SERVICE_NAME: &str = "test";
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
