@@ -12,9 +12,7 @@ pub async fn serve(service_port: u16) -> anyhow::Result<()> {
         "Multicast interface indexes: {:?}",
         &multicast_interface_indexes
     );
-    let multicast_address = crate::MULTICAST_ADDRESS.parse()?;
     tansa::serve(
-        multicast_address,
         multicast_interface_indexes,
         crate::SERVICE_NAME,
         service_port,
