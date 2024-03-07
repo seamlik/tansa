@@ -2,12 +2,7 @@ use crate::multicast::MulticastSender;
 use crate::multicast::TokioMulticastSender;
 use crate::response_collector::GrpcResponseCollector;
 use crate::response_collector::ResponseCollector;
-use futures_util::FutureExt;
-use futures_util::StreamExt;
-use futures_util::TryFuture;
-use futures_util::TryFutureExt;
 use futures_util::TryStream;
-use futures_util::TryStreamExt;
 use prost::Message;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -64,7 +59,7 @@ impl Scanner {
             .map(|inter| multicast_sender.send(*inter, multicast_address, request_packet.clone()));
         let send_request_task = futures_util::future::try_join_all(send_request_task);
 
-        join(send_request_task, response_collector.collect())
+        crate::stream::join(send_request_task, response_collector.collect())
     }
 }
 
@@ -75,15 +70,4 @@ pub enum ScanError {
 
     #[error("Error in response collection")]
     ResponseCollection(#[from] tonic::transport::Error),
-}
-
-fn join<F, S>(future: F, stream: S) -> impl TryStream<Ok = Service, Error = ScanError>
-where
-    F: TryFuture<Ok = Vec<()>, Error = std::io::Error> + Send + 'static,
-    S: TryStream<Ok = Service, Error = tonic::transport::Error> + Send + 'static,
-{
-    let wrapped_future = future.map_ok(|_| None).map_err(Into::into).into_stream();
-    let wrapped_stream = stream.map_ok(Some).map_err(Into::into);
-    futures_util::stream::select(wrapped_future, wrapped_stream)
-        .filter_map(|item| async { item.transpose() })
 }

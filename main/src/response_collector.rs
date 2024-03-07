@@ -1,11 +1,8 @@
 use crate::scanner::Service;
 use futures_channel::mpsc::UnboundedReceiver;
 use futures_channel::mpsc::UnboundedSender;
-use futures_util::Future;
-use futures_util::FutureExt;
 use futures_util::Stream;
 use futures_util::StreamExt;
-use futures_util::TryStreamExt;
 use mockall::automock;
 use std::net::IpAddr;
 use std::net::SocketAddrV6;
@@ -67,9 +64,10 @@ impl ResponseCollector for GrpcResponseCollector {
     fn collect(
         self,
     ) -> impl Stream<Item = Result<Service, tonic::transport::Error>> + Send + 'static {
-        join(
+        log::info!("`ResponseCollector` listening at port {}", self.get_port());
+        crate::stream::join(
             self.grpc.serve_with_incoming(self.tcp),
-            self.response_receiver,
+            self.response_receiver.map(Ok::<_, tonic::transport::Error>),
         )
     }
 }
@@ -94,22 +92,154 @@ impl ResponseCollectorService for ResponseCollectorServiceProvider {
             Ok(p) => p,
             Err(_) => return Err(Status::invalid_argument("Port out of range")),
         };
+        if remote_service_port == 0 {
+            return Err(Status::invalid_argument("Port must not be 0"));
+        }
         let service = Service {
             address: SocketAddrV6::new(remote_ip, remote_service_port, 0, 0),
         };
         match self.response_sender.unbounded_send(service) {
             Ok(_) => Ok(tonic::Response::new(())),
-            Err(_) => Err(Status::internal("No longer accepting responses")),
+            Err(_) => Err(Status::unavailable("No longer accepting responses")),
         }
     }
 }
 
-fn join(
-    future: impl Future<Output = Result<(), tonic::transport::Error>> + Send + 'static,
-    stream: impl Stream<Item = Service> + Send + 'static,
-) -> impl Stream<Item = Result<Service, tonic::transport::Error>> + Send + 'static {
-    let wrapped_future = future.into_stream().map_ok(|_| None);
-    let wrapped_stream = stream.map(|response| Ok(Some(response)));
-    futures_util::stream::select(wrapped_future, wrapped_stream)
-        .filter_map(|item| async { item.transpose() })
+#[cfg(test)]
+mod test {
+    use super::*;
+    use futures_util::TryStreamExt;
+    use tansa_protocol::response_collector_service_client::ResponseCollectorServiceClient;
+    use tonic::transport::server::TcpConnectInfo;
+    use tonic::IntoRequest;
+    use tonic::Request;
+
+    #[tokio::test]
+    async fn response_collector_port_must_not_be_0() {
+        let collector = GrpcResponseCollector::new().await.unwrap();
+        assert_ne!(collector.get_port(), 0, "Port must not be 0");
+    }
+
+    #[tokio::test]
+    async fn collect() {
+        let collector = GrpcResponseCollector::new().await.unwrap();
+        let port = collector.get_port();
+        let responses = vec![Response { service_port: 1 }, Response { service_port: 2 }];
+
+        // When
+        let services: Vec<_> = crate::stream::join::<anyhow::Error, _, _, _, _, _, _>(
+            submit_responses(port, responses.clone()),
+            collector.collect().take(2),
+        )
+        .try_collect()
+        .await
+        .unwrap();
+
+        // Then
+        assert_eq!(services[0].address, "[::1]:1".parse().unwrap());
+        assert_eq!(services[1].address, "[::1]:2".parse().unwrap());
+    }
+
+    #[tokio::test]
+    async fn ip_unavailable() {
+        let provider = new_response_collector_service_provider();
+
+        // When
+        let status = provider
+            .submit_response(Request::new(Default::default()))
+            .await
+            .unwrap_err();
+
+        // Then
+        assert_eq!(status.message(), "IP unavailable");
+    }
+
+    #[tokio::test]
+    async fn ipv4_unsupported() {
+        let provider = new_response_collector_service_provider();
+
+        let mut request = Response::default().into_request();
+        let tcp_connect_info = TcpConnectInfo {
+            local_addr: None,
+            remote_addr: Some("1.1.1.1:1".parse().unwrap()),
+        };
+        request.extensions_mut().insert(tcp_connect_info);
+
+        // When
+        let status = provider.submit_response(request).await.unwrap_err();
+
+        // Then
+        assert_eq!(status.message(), "IPv4 unsupported");
+    }
+
+    #[tokio::test]
+    async fn port_out_of_range() {
+        let provider = new_response_collector_service_provider();
+
+        let mut request = Response {
+            service_port: 100000,
+        }
+        .into_request();
+        let tcp_connect_info = TcpConnectInfo {
+            local_addr: None,
+            remote_addr: Some("[::1]:1".parse().unwrap()),
+        };
+        request.extensions_mut().insert(tcp_connect_info);
+
+        // When
+        let status = provider.submit_response(request).await.unwrap_err();
+
+        // Then
+        assert_eq!(status.message(), "Port out of range");
+    }
+
+    #[tokio::test]
+    async fn port_must_not_be_0() {
+        let provider = new_response_collector_service_provider();
+
+        let mut request = Response { service_port: 0 }.into_request();
+        let tcp_connect_info = TcpConnectInfo {
+            local_addr: None,
+            remote_addr: Some("[::1]:1".parse().unwrap()),
+        };
+        request.extensions_mut().insert(tcp_connect_info);
+
+        // When
+        let status = provider.submit_response(request).await.unwrap_err();
+
+        // Then
+        assert_eq!(status.message(), "Port must not be 0");
+    }
+
+    #[tokio::test]
+    async fn unavailable() {
+        let provider = new_response_collector_service_provider();
+
+        let mut request = Response { service_port: 1 }.into_request();
+        let tcp_connect_info = TcpConnectInfo {
+            local_addr: None,
+            remote_addr: Some("[::1]:1".parse().unwrap()),
+        };
+        request.extensions_mut().insert(tcp_connect_info);
+
+        // When
+        let status = provider.submit_response(request).await.unwrap_err();
+
+        // Then
+        assert_eq!(status.message(), "No longer accepting responses");
+    }
+
+    async fn submit_responses(port: u16, responses: Vec<Response>) -> anyhow::Result<()> {
+        let address = format!("http://[::1]:{}", port);
+        let mut client = ResponseCollectorServiceClient::connect(address).await?;
+        for response in responses {
+            client.submit_response(response.into_request()).await?;
+        }
+        Ok(())
+    }
+
+    fn new_response_collector_service_provider() -> ResponseCollectorServiceProvider {
+        let (response_sender, _) = futures_channel::mpsc::unbounded();
+        ResponseCollectorServiceProvider { response_sender }
+    }
 }

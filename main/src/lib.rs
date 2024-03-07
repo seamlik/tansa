@@ -3,6 +3,7 @@ mod response_collector;
 mod response_sender;
 mod scanner;
 mod server;
+mod stream;
 
 use std::net::SocketAddrV6;
 
