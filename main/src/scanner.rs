@@ -29,7 +29,7 @@ impl Scanner {
         Self::new_internal(
             service_name,
             multicast_network_interface_indexes,
-            GrpcResponseCollector::new_boxed().await?,
+            Box::new(GrpcResponseCollector::new().await?),
             Arc::new(TokioMulticastSender),
         )
     }

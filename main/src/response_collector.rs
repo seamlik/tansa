@@ -30,7 +30,7 @@ pub struct GrpcResponseCollector {
 }
 
 impl GrpcResponseCollector {
-    pub async fn new_boxed() -> std::io::Result<Box<dyn ResponseCollector>> {
+    pub async fn new() -> std::io::Result<Self> {
         let tcp = TcpListener::bind("[::]:0").await?;
         let port = tcp.local_addr()?.port();
         let tcp = TcpListenerStream::new(tcp);
@@ -46,12 +46,12 @@ impl GrpcResponseCollector {
             .add_service(health_server)
             .add_service(ResponseCollectorServiceServer::new(grpc_service_provider));
 
-        Ok(Box::new(Self {
+        Ok(Self {
             tcp,
             port,
             grpc,
             response_receiver,
-        }))
+        })
     }
 }
 
@@ -113,13 +113,13 @@ mod test {
 
     #[tokio::test]
     async fn response_collector_port_must_not_be_0() {
-        let collector = GrpcResponseCollector::new_boxed().await.unwrap();
+        let collector = GrpcResponseCollector::new().await.unwrap();
         assert_ne!(collector.get_port(), 0, "Port must not be 0");
     }
 
     #[tokio::test]
     async fn collect() {
-        let collector = GrpcResponseCollector::new_boxed().await.unwrap();
+        let collector = Box::new(GrpcResponseCollector::new().await.unwrap());
         let port = collector.get_port();
         let responses = vec![Response { service_port: 1 }, Response { service_port: 2 }];
 
