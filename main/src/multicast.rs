@@ -28,13 +28,24 @@ pub struct TokioMulticastReceiver {
 
 impl TokioMulticastReceiver {
     pub fn new(buffer_size: usize, port: u16) -> std::io::Result<Self> {
+        Self::new_with_multicast_loop(buffer_size, port)
+    }
+
+    /// Creates a new instance with multicast loop enabled.
+    ///
+    /// Multicast loop should be enabled only in test.
+    /// Disabling it makes sure that the socket never receives any packets sent from the current network interface.
+    /// This reduces the chance of flooding and filters out echoes for [Scanner](crate::Scanner)s.
+    fn new_with_multicast_loop(buffer_size: usize, port: u16) -> std::io::Result<Self> {
         let socket = new_multicast_socket()?;
+        socket.set_multicast_loop_v6(true)?;
+
         let local_ip = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0);
+        log::info!("Binding multicast receiver socket at {}", local_ip);
         socket.bind(&local_ip.into())?;
-        log::info!("Multicast receiver socket listening at {}", local_ip);
-        let socket = new_async_socket(socket)?;
+
         Ok(Self {
-            socket,
+            socket: new_async_socket(socket)?,
             buffer_size,
         })
     }
@@ -82,7 +93,6 @@ pub trait MulticastSender {
     ) -> BoxFuture<'static, std::io::Result<()>>;
 }
 
-#[derive(Default)]
 pub struct TokioMulticastSender;
 
 impl TokioMulticastSender {
@@ -93,6 +103,7 @@ impl TokioMulticastSender {
     ) -> std::io::Result<()> {
         let socket = new_multicast_socket()?;
         socket.set_multicast_if_v6(network_interface_index)?;
+        socket.set_multicast_loop_v6(false)?;
 
         let local_ip = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
         socket.bind(&local_ip.into())?;
@@ -117,7 +128,6 @@ impl MulticastSender for TokioMulticastSender {
 
 fn new_multicast_socket() -> std::io::Result<Socket> {
     let socket = Socket::new(Domain::IPV6, Type::DGRAM, None)?;
-    socket.set_multicast_loop_v6(false)?;
     socket.set_reuse_address(true)?;
     socket.set_only_v6(true)?;
     Ok(socket)
@@ -126,4 +136,33 @@ fn new_multicast_socket() -> std::io::Result<Socket> {
 fn new_async_socket(socket: Socket) -> std::io::Result<UdpSocket> {
     let socket: StdUdpSocket = socket.into();
     socket.try_into()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[tokio::test]
+    async fn multicast() {
+        let address = crate::get_multicast_address();
+        let expected_data = vec![1, 2, 3];
+
+        let receiver = TokioMulticastReceiver::new_with_multicast_loop(16, address.port()).unwrap();
+        receiver.join_multicast(*address.ip(), 1).unwrap();
+
+        match futures_util::future::try_join(
+            TokioMulticastSender.send(1, address, expected_data.clone().into()),
+            receiver.receive(),
+        )
+        .await
+        {
+            Ok((_, (actual_data, _))) => {
+                assert_eq!(expected_data, actual_data, "Must receive the packet back")
+            }
+            Err(e) if e.raw_os_error() == Some(101) => {
+                println!("Network unreachable, ignoring test result.")
+            }
+            Err(e) => panic!("Test failed: {}", e),
+        }
+    }
 }
