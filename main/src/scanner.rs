@@ -16,7 +16,8 @@ pub struct Service {
 pub struct Scanner {
     service_name: String,
     multicast_network_interface_indexes: Vec<u32>,
-    response_collector: GrpcResponseCollector,
+    response_collector: Box<dyn ResponseCollector>,
+    multicast_sender: Arc<dyn MulticastSender>,
 }
 
 impl Scanner {
@@ -24,42 +25,46 @@ impl Scanner {
         service_name: String,
         multicast_network_interface_indexes: impl IntoIterator<Item = u32>,
     ) -> std::io::Result<Self> {
-        let response_collector = GrpcResponseCollector::new().await?;
+        Self::new_internal(
+            service_name,
+            multicast_network_interface_indexes,
+            GrpcResponseCollector::new_boxed().await?,
+            Arc::new(TokioMulticastSender),
+        )
+    }
+    fn new_internal(
+        service_name: String,
+        multicast_network_interface_indexes: impl IntoIterator<Item = u32>,
+        response_collector: Box<dyn ResponseCollector>,
+        multicast_sender: Arc<dyn MulticastSender>,
+    ) -> std::io::Result<Self> {
         Ok(Self {
             service_name,
             multicast_network_interface_indexes: multicast_network_interface_indexes
                 .into_iter()
                 .collect(),
             response_collector,
+            multicast_sender,
         })
     }
     pub fn scan(self) -> impl TryStream<Ok = Service, Error = ScanError> {
-        Self::scan_internal(
-            self.service_name,
-            &self.multicast_network_interface_indexes,
-            Arc::new(TokioMulticastSender),
-            self.response_collector,
-        )
-    }
-    fn scan_internal(
-        service_name: String,
-        multicast_network_interface_indexes: &[u32],
-        multicast_sender: Arc<dyn MulticastSender>,
-        response_collector: impl ResponseCollector,
-    ) -> impl TryStream<Ok = Service, Error = ScanError> {
         let request = Request {
-            service_name,
-            response_collector_port: response_collector.get_port().into(),
+            service_name: self.service_name,
+            response_collector_port: self.response_collector.get_port().into(),
         };
         let request_packet: Arc<[u8]> = request.encode_to_vec().into();
         let multicast_address = crate::get_multicast_address();
 
-        let send_request_task = multicast_network_interface_indexes
+        let send_request_task = self
+            .multicast_network_interface_indexes
             .iter()
-            .map(|inter| multicast_sender.send(*inter, multicast_address, request_packet.clone()));
+            .map(|inter| {
+                self.multicast_sender
+                    .send(*inter, multicast_address, request_packet.clone())
+            });
         let send_request_task = futures_util::future::try_join_all(send_request_task);
 
-        crate::stream::join(send_request_task, response_collector.collect())
+        crate::stream::join(send_request_task, self.response_collector.collect())
     }
 }
 

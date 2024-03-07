@@ -1,7 +1,7 @@
 use crate::scanner::Service;
 use futures_channel::mpsc::UnboundedReceiver;
 use futures_channel::mpsc::UnboundedSender;
-use futures_util::Stream;
+use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 use mockall::automock;
 use std::net::IpAddr;
@@ -19,9 +19,7 @@ use tower_layer::Identity;
 #[automock]
 pub trait ResponseCollector {
     fn get_port(&self) -> u16;
-    fn collect(
-        self,
-    ) -> impl Stream<Item = Result<Service, tonic::transport::Error>> + Send + 'static;
+    fn collect(self: Box<Self>) -> BoxStream<'static, Result<Service, tonic::transport::Error>>;
 }
 
 pub struct GrpcResponseCollector {
@@ -32,7 +30,7 @@ pub struct GrpcResponseCollector {
 }
 
 impl GrpcResponseCollector {
-    pub async fn new() -> std::io::Result<Self> {
+    pub async fn new_boxed() -> std::io::Result<Box<dyn ResponseCollector>> {
         let tcp = TcpListener::bind("[::]:0").await?;
         let port = tcp.local_addr()?.port();
         let tcp = TcpListenerStream::new(tcp);
@@ -48,12 +46,12 @@ impl GrpcResponseCollector {
             .add_service(health_server)
             .add_service(ResponseCollectorServiceServer::new(grpc_service_provider));
 
-        Ok(Self {
+        Ok(Box::new(Self {
             tcp,
             port,
             grpc,
             response_receiver,
-        })
+        }))
     }
 }
 
@@ -61,14 +59,13 @@ impl ResponseCollector for GrpcResponseCollector {
     fn get_port(&self) -> u16 {
         self.port
     }
-    fn collect(
-        self,
-    ) -> impl Stream<Item = Result<Service, tonic::transport::Error>> + Send + 'static {
+    fn collect(self: Box<Self>) -> BoxStream<'static, Result<Service, tonic::transport::Error>> {
         log::info!("`ResponseCollector` listening at port {}", self.get_port());
         crate::stream::join(
             self.grpc.serve_with_incoming(self.tcp),
             self.response_receiver.map(Ok::<_, tonic::transport::Error>),
         )
+        .boxed()
     }
 }
 
@@ -116,13 +113,13 @@ mod test {
 
     #[tokio::test]
     async fn response_collector_port_must_not_be_0() {
-        let collector = GrpcResponseCollector::new().await.unwrap();
+        let collector = GrpcResponseCollector::new_boxed().await.unwrap();
         assert_ne!(collector.get_port(), 0, "Port must not be 0");
     }
 
     #[tokio::test]
     async fn collect() {
-        let collector = GrpcResponseCollector::new().await.unwrap();
+        let collector = GrpcResponseCollector::new_boxed().await.unwrap();
         let port = collector.get_port();
         let responses = vec![Response { service_port: 1 }, Response { service_port: 2 }];
 
