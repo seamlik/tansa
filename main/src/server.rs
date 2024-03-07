@@ -200,6 +200,36 @@ mod test {
         assert_server_exits_with_dummy_error(result);
     }
 
+    #[tokio::test]
+    async fn ignore_other_service_names() {
+        let request = Request {
+            service_name: "UNKNOWN".into(),
+            response_collector_port: 3,
+        };
+        let request_address = "[::123]:2".parse().unwrap();
+
+        let mut multicast_receiver = MockMulticastReceiver::default();
+        let mut requests = [
+            Ok((request.encode_to_vec(), request_address)),
+            Err(ErrorKind::Other.into()),
+        ]
+        .into_iter();
+        multicast_receiver
+            .expect_join_multicast()
+            .returning(|_, _| Ok(()));
+        multicast_receiver
+            .expect_receive()
+            .returning(move || requests.next().unwrap());
+
+        let response_sender = MockResponseSender::default();
+
+        // when
+        let result = serve_internal([1], "SERVICE", 1, multicast_receiver, response_sender).await;
+
+        // Then
+        assert_server_exits_with_dummy_error(result);
+    }
+
     fn assert_server_exits_with_dummy_error(result: std::io::Result<()>) {
         assert_eq!(
             ErrorKind::Other,
