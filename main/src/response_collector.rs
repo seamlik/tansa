@@ -105,8 +105,9 @@ impl ResponseCollectorService for ResponseCollectorServiceProvider {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::response_sender::GrpcResponseSender;
+    use crate::response_sender::ResponseSender;
     use futures_util::TryStreamExt;
-    use tansa_protocol::response_collector_service_client::ResponseCollectorServiceClient;
     use tonic::transport::server::TcpConnectInfo;
     use tonic::IntoRequest;
     use tonic::Request;
@@ -227,10 +228,12 @@ mod test {
     }
 
     async fn submit_responses(port: u16, responses: Vec<Response>) -> anyhow::Result<()> {
-        let address = format!("http://[::1]:{}", port);
-        let mut client = ResponseCollectorServiceClient::connect(address).await?;
+        let response_collector_address = format!("http://[::1]:{}", port);
+        let response_sender = GrpcResponseSender;
         for response in responses {
-            client.submit_response(response.into_request()).await?;
+            response_sender
+                .send(response, response_collector_address.clone())
+                .await?;
         }
         Ok(())
     }
