@@ -3,13 +3,14 @@ mod server;
 use clap::Parser;
 use clap::Subcommand;
 
-const SERVICE_NAME: &str = "test";
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
     match Cli::parse().command {
-        Command::Serve { service_port } => crate::server::serve(service_port).await?,
+        Command::Serve {
+            service_name,
+            service_port,
+        } => crate::server::serve(&service_name, service_port).await?,
     };
     Ok(())
 }
@@ -22,5 +23,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    Serve { service_port: u16 },
+    Serve {
+        #[arg(long)]
+        service_name: String,
+
+        #[arg(long)]
+        service_port: u16,
+    },
 }

@@ -5,19 +5,14 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-pub async fn serve(service_port: u16) -> anyhow::Result<()> {
+pub async fn serve(service_name: &str, service_port: u16) -> anyhow::Result<()> {
     log::info!("Getting multicast interface indexes with JShell");
     let multicast_interface_indexes = get_multicast_interface_indexes().await?;
     log::info!(
         "Multicast interface indexes: {:?}",
         &multicast_interface_indexes
     );
-    tansa::serve(
-        multicast_interface_indexes,
-        crate::SERVICE_NAME,
-        service_port,
-    )
-    .await?;
+    tansa::serve(multicast_interface_indexes, service_name, service_port).await?;
     Ok(())
 }
 
