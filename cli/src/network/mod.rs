@@ -5,18 +5,8 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-pub async fn serve(service_name: &str, service_port: u16) -> anyhow::Result<()> {
-    log::info!("Getting multicast interface indexes with JShell");
-    let multicast_interface_indexes = get_multicast_interface_indexes().await?;
-    log::info!(
-        "Multicast interface indexes: {:?}",
-        &multicast_interface_indexes
-    );
-    tansa::serve(multicast_interface_indexes, service_name, service_port).await?;
-    Ok(())
-}
-
-async fn get_multicast_interface_indexes() -> anyhow::Result<Vec<u32>> {
+pub async fn get_multicast_interface_indexes() -> anyhow::Result<Vec<u32>> {
+    println!("Getting multicast interface indexes with JShell");
     let command = "jshell";
     let mut process = Command::new(command)
         .arg("-")
@@ -41,11 +31,12 @@ async fn get_multicast_interface_indexes() -> anyhow::Result<Vec<u32>> {
         .ok_or_else(|| anyhow::anyhow!("STDOUT unavailable"))?;
     let mut result = String::default();
     stdout.read_to_string(&mut result).await?;
-    result
+    let interfaces = result
         .split_whitespace()
         .map(FromStr::from_str)
-        .collect::<Result<_, _>>()
-        .map_err(Into::into)
+        .collect::<Result<_, _>>()?;
+    println!("Multicast interface indexes: {:?}", &interfaces);
+    Ok(interfaces)
 }
 
 #[cfg(test)]

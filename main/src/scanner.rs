@@ -18,7 +18,7 @@ pub struct Scanner {
     service_name: String,
     multicast_network_interface_indexes: Vec<u32>,
     response_collector: Box<dyn ResponseCollector>,
-    multicast_sender: Arc<dyn MulticastSender>,
+    multicast_sender: Arc<dyn MulticastSender + Send + Sync>,
 }
 
 impl Scanner {
@@ -37,7 +37,7 @@ impl Scanner {
         service_name: String,
         multicast_network_interface_indexes: impl IntoIterator<Item = u32>,
         response_collector: Box<dyn ResponseCollector>,
-        multicast_sender: Arc<dyn MulticastSender>,
+        multicast_sender: Arc<dyn MulticastSender + Send + Sync>,
     ) -> std::io::Result<Self> {
         Ok(Self {
             service_name,
@@ -60,12 +60,40 @@ impl Scanner {
             .multicast_network_interface_indexes
             .iter()
             .map(|inter| {
-                self.multicast_sender
-                    .send(*inter, multicast_address, request_packet.clone())
+                Self::send_request(
+                    self.multicast_sender.clone(),
+                    *inter,
+                    multicast_address,
+                    request_packet.clone(),
+                )
             });
         let send_request_task = futures_util::future::try_join_all(send_request_task);
 
         crate::stream::join(send_request_task, self.response_collector.collect())
+    }
+
+    async fn send_request(
+        multicast_sender: Arc<dyn MulticastSender + Send + Sync>,
+        network_interface_index: u32,
+        destination: SocketAddrV6,
+        data: Arc<[u8]>,
+    ) -> std::io::Result<()> {
+        log::debug!(
+            "Sending packet from network interface {} to {}",
+            network_interface_index,
+            destination
+        );
+        if let Err(e) = multicast_sender
+            .send(network_interface_index, destination, data)
+            .await
+        {
+            log::warn!(
+                "Failed to send a request to network interface {}: {}",
+                network_interface_index,
+                e
+            );
+        }
+        Ok(())
     }
 }
 
