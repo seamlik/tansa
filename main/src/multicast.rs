@@ -28,17 +28,7 @@ pub struct TokioMulticastReceiver {
 
 impl TokioMulticastReceiver {
     pub fn new(buffer_size: usize, port: u16) -> std::io::Result<Self> {
-        Self::new_with_multicast_loop(buffer_size, port)
-    }
-
-    /// Creates a new instance with multicast loop enabled.
-    ///
-    /// Multicast loop should be enabled only in test.
-    /// Disabling it makes sure that the socket never receives any packets sent from the current network interface.
-    /// This reduces the chance of flooding and filters out echoes for [Scanner](crate::Scanner)s.
-    fn new_with_multicast_loop(buffer_size: usize, port: u16) -> std::io::Result<Self> {
         let socket = new_multicast_socket()?;
-        socket.set_multicast_loop_v6(true)?;
 
         let local_ip = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0);
         log::info!("Binding multicast receiver socket at {}", local_ip);
@@ -48,14 +38,6 @@ impl TokioMulticastReceiver {
             socket: new_async_socket(socket)?,
             buffer_size,
         })
-    }
-
-    fn unwrap_ipv6(address: SocketAddr) -> SocketAddrV6 {
-        if let SocketAddr::V6(addr) = address {
-            addr
-        } else {
-            panic!("Must be IPv6")
-        }
     }
 }
 
@@ -79,7 +61,15 @@ impl MulticastReceiver for TokioMulticastReceiver {
         buffer.resize(self.buffer_size, 0);
         let (receive_size, remote_address) = self.socket.recv_from(&mut buffer).await?;
         buffer.resize(receive_size, 0);
-        Ok((buffer, Self::unwrap_ipv6(remote_address)))
+        Ok((buffer, unwrap_ipv6(remote_address)))
+    }
+}
+
+fn unwrap_ipv6(address: SocketAddr) -> SocketAddrV6 {
+    if let SocketAddr::V6(addr) = address {
+        addr
+    } else {
+        panic!("Must be IPv6")
     }
 }
 
@@ -130,6 +120,11 @@ fn new_multicast_socket() -> std::io::Result<Socket> {
     let socket = Socket::new(Domain::IPV6, Type::DGRAM, None)?;
     socket.set_reuse_address(true)?;
     socket.set_only_v6(true)?;
+
+    // Multicast loop should be enabled only in test.
+    // Disabling it reduces the chance of flooding and filters out echoes.
+    socket.set_multicast_loop_v6(false)?;
+
     Ok(socket)
 }
 
@@ -147,7 +142,8 @@ mod test {
         let address = crate::get_multicast_address();
         let expected_data = vec![1, 2, 3];
 
-        let receiver = TokioMulticastReceiver::new_with_multicast_loop(16, address.port()).unwrap();
+        let receiver = TokioMulticastReceiver::new(16, address.port()).unwrap();
+        receiver.socket.set_multicast_loop_v6(true).unwrap();
         receiver.join_multicast(*address.ip(), 1).unwrap();
 
         match futures_util::future::try_join(
