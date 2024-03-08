@@ -7,7 +7,7 @@ boolean hasIpv6(NetworkInterface inter) {
 
 boolean isCandidate(NetworkInterface inter) {
   try {
-    return inter.isUp() && inter.supportsMulticast() && hasIpv6(inter);
+    return !inter.isLoopback() && inter.isUp() && inter.supportsMulticast() && hasIpv6(inter);
   } catch (SocketException e) {
     throw new IllegalStateException(e);
   }
