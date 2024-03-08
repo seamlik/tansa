@@ -3,6 +3,7 @@ use crate::multicast::TokioMulticastSender;
 use crate::response_collector::GrpcResponseCollector;
 use crate::response_collector::ResponseCollector;
 use futures_util::Stream;
+use futures_util::TryFutureExt;
 use prost::Message;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -53,54 +54,44 @@ impl Scanner {
             service_name: self.service_name,
             response_collector_port: self.response_collector.get_port().into(),
         };
-        let request_packet: Arc<[u8]> = request.encode_to_vec().into();
-        let multicast_address = crate::get_multicast_address();
-
-        let send_request_task = self
-            .multicast_network_interface_indexes
-            .iter()
-            .map(|inter| {
-                Self::send_request(
-                    self.multicast_sender.clone(),
-                    *inter,
-                    multicast_address,
-                    request_packet.clone(),
-                )
-            });
-        let send_request_task = futures_util::future::try_join_all(send_request_task);
-
-        crate::stream::join(send_request_task, self.response_collector.collect())
+        crate::stream::join(
+            Self::send_requests(
+                self.multicast_sender,
+                self.multicast_network_interface_indexes,
+                request,
+            ),
+            self.response_collector.collect(),
+        )
     }
 
-    async fn send_request(
+    async fn send_requests(
         multicast_sender: Arc<dyn MulticastSender + Send + Sync>,
-        network_interface_index: u32,
-        destination: SocketAddrV6,
-        data: Arc<[u8]>,
-    ) -> std::io::Result<()> {
-        log::debug!(
-            "Sending packet from network interface {} to {}",
-            network_interface_index,
-            destination
-        );
-        if let Err(e) = multicast_sender
-            .send(network_interface_index, destination, data)
-            .await
-        {
-            log::warn!(
-                "Failed to send a request to network interface {}: {}",
-                network_interface_index,
-                e
-            );
+        network_interface_indexes: Vec<u32>,
+        request: Request,
+    ) -> Result<(), ScanError> {
+        let multicast_address = crate::get_multicast_address();
+        log::debug!("Sending requests to {}", multicast_address);
+        let packet: Arc<[u8]> = request.encode_to_vec().into();
+        let tasks = network_interface_indexes.into_iter().map(|i| {
+            multicast_sender
+                .send(i, multicast_address, packet.clone())
+                .inspect_err(move |e| {
+                    log::warn!("Failed to send to network interface {}: {}", i, e)
+                })
+        });
+        let tasks = futures_util::future::join_all(tasks).await;
+        if tasks.iter().filter(|r| r.is_ok()).count() == 0 {
+            Err(ScanError::MulticastRequest)
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }
 
 #[derive(Error, Debug)]
 pub enum ScanError {
-    #[error("Failed in sending a multicast request")]
-    MulticastRequest(#[from] std::io::Error),
+    #[error("Failed to send the multicast request to all network interfaces")]
+    MulticastRequest,
 
     #[error("Error in response collection")]
     ResponseCollection(#[from] tonic::transport::Error),
@@ -115,6 +106,7 @@ mod test {
     use futures_util::StreamExt;
     use futures_util::TryStreamExt;
     use mockall::predicate::eq;
+    use std::io::ErrorKind;
 
     #[tokio::test]
     async fn scan() {
@@ -154,10 +146,14 @@ mod test {
             .expect_send()
             .with(eq(2), eq(multicast_address), eq(request_packet.clone()))
             .return_once(|_, _, _| async { Ok(()) }.boxed());
+        multicast_sender
+            .expect_send()
+            .with(eq(3), eq(multicast_address), eq(request_packet.clone()))
+            .return_once(|_, _, _| async { Err(ErrorKind::ConnectionRefused.into()) }.boxed());
 
         let scanner = Scanner::new_internal(
             request.service_name,
-            [1, 2],
+            [1, 2, 3],
             Box::new(response_collector),
             Arc::new(multicast_sender),
         )
@@ -168,5 +164,36 @@ mod test {
 
         // Then
         assert_eq!(actual_services, expected_services);
+    }
+
+    #[tokio::test]
+    async fn all_network_interfaces_fail() {
+        let mut response_collector = MockResponseCollector::new();
+        response_collector.expect_get_port().return_const(1u16);
+        response_collector
+            .expect_collect()
+            .return_once(|| futures_util::stream::empty().boxed());
+
+        let mut multicast_sender = MockMulticastSender::new();
+        multicast_sender
+            .expect_send()
+            .returning(|_, _, _| async { Err(ErrorKind::ConnectionRefused.into()) }.boxed());
+
+        let scanner = Scanner::new_internal(
+            "SERVICE".into(),
+            [1, 2],
+            Box::new(response_collector),
+            Arc::new(multicast_sender),
+        )
+        .unwrap();
+
+        // When
+        let e = scanner.scan().try_collect::<Vec<_>>().await.unwrap_err();
+
+        // Then
+        if let ScanError::MulticastRequest = e {
+        } else {
+            panic!("If all network interfaces failed, `MulticastRequest` must be returned.")
+        }
     }
 }
