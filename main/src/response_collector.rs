@@ -60,7 +60,7 @@ impl ResponseCollector for GrpcResponseCollector {
         self.port
     }
     fn collect(self: Box<Self>) -> BoxStream<'static, Result<Service, tonic::transport::Error>> {
-        log::info!("`ResponseCollector` listening at port {}", self.get_port());
+        log::info!("Collecting responses at port {}", self.get_port());
         crate::stream::join(
             self.grpc.serve_with_incoming(self.tcp),
             self.response_receiver.map(Ok::<_, tonic::transport::Error>),
@@ -79,12 +79,19 @@ impl ResponseCollectorService for ResponseCollectorServiceProvider {
         &self,
         request: tonic::Request<Response>,
     ) -> Result<tonic::Response<()>, Status> {
-        let remote_ip = match request.remote_addr().map(|addr| addr.ip()) {
+        let remote_address = request.remote_addr();
+        let request = request.into_inner();
+        log::debug!(
+            "Received {:?} from `ResponseSender` at {:?}",
+            request,
+            remote_address
+        );
+
+        let remote_ip = match remote_address.map(|addr| addr.ip()) {
             Some(IpAddr::V6(ip)) => ip,
             Some(IpAddr::V4(_)) => return Err(Status::unimplemented("IPv4 unsupported")),
             None => return Err(Status::unimplemented("IP unavailable")),
         };
-        let request = request.into_inner();
         let remote_service_port = match request.service_port.try_into() {
             Ok(p) => p,
             Err(_) => return Err(Status::invalid_argument("Port out of range")),

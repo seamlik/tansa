@@ -61,6 +61,7 @@ async fn handle_packet(
     response_sender: &impl ResponseSender,
 ) -> anyhow::Result<()> {
     let request = Request::decode(packet.as_slice())?;
+    log::debug!("Received {:?} via multicast from {}", request, remote_ip);
     if service_name != request.service_name {
         log::debug!(
             "Dropping a request for an unknown service: {}",
@@ -70,13 +71,14 @@ async fn handle_packet(
     }
     let response_collector_address =
         format!("http://[{}]:{}", remote_ip, request.response_collector_port);
-    log::info!(
-        "Connecting to response collector at {}",
-        &response_collector_address
-    );
     let response = Response {
         service_port: service_port.into(),
     };
+    log::debug!(
+        "Sending {:?} to `ResponseCollector` at {}",
+        response,
+        response_collector_address
+    );
     response_sender
         .send(response, response_collector_address)
         .await

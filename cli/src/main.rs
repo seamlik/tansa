@@ -50,7 +50,7 @@ async fn scan(service_name: String) -> anyhow::Result<()> {
         .await?
         .scan()
         .try_for_each(|service| {
-            println!("Scanned: {:?}", service);
+            println!("Discovered {:?}", service);
             async { Ok(()) }
         })
         .await?;

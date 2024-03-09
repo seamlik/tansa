@@ -97,7 +97,13 @@ impl TokioMulticastSender {
 
         let local_ip = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
         socket.bind(&local_ip.into())?;
+        log::debug!("Created multicast socket at {:?}", socket.local_addr()?);
 
+        log::debug!(
+            "Sending packet from network interface {} to multicast address {}",
+            network_interface_index,
+            destination
+        );
         new_async_socket(socket)?
             .send_to(&data, destination)
             .await?;

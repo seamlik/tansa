@@ -70,7 +70,11 @@ impl Scanner {
         request: Request,
     ) -> Result<(), ScanError> {
         let multicast_address = crate::get_multicast_address();
-        log::debug!("Sending requests to {}", multicast_address);
+        log::debug!(
+            "Sending {:?} to multicast address {}",
+            request,
+            multicast_address
+        );
         let packet: Arc<[u8]> = request.encode_to_vec().into();
         let tasks = network_interface_indexes.into_iter().map(|i| {
             multicast_sender
