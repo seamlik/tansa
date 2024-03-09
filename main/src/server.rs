@@ -10,8 +10,8 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tansa_protocol::DecodeError;
+use tansa_protocol::ProtobufDecoder;
 use tansa_protocol::Request;
-use tansa_protocol::RequestDecoder;
 use tansa_protocol::Response;
 
 pub async fn serve(discovery_port: u16, service_port: u16) -> Result<(), crate::Error> {
@@ -19,7 +19,8 @@ pub async fn serve(discovery_port: u16, service_port: u16) -> Result<(), crate::
         return Err(crate::Error::InvalidDiscoveryPort);
     }
     let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
-    let multicast_receiver = TokioMulticastReceiver::new(multicast_address, RequestDecoder).await?;
+    let multicast_receiver =
+        TokioMulticastReceiver::new(multicast_address, ProtobufDecoder::default()).await?;
     serve_internal(service_port, multicast_receiver, GrpcResponseSender).await
 }
 

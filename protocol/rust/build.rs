@@ -1,5 +1,5 @@
 fn main() -> std::io::Result<()> {
-    let protos: Vec<_> = ["response_collector_service", "request"]
+    let protos: Vec<_> = ["response_collector_service", "multicast_packet"]
         .into_iter()
         .map(|name| format!("../grpc/tw/seamlik/tansa/v1/{}.proto", name))
         .collect();
