@@ -4,6 +4,7 @@ use futures_channel::mpsc::UnboundedSender;
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 use mockall::automock;
+use std::fmt::Debug;
 use std::net::IpAddr;
 use std::net::SocketAddrV6;
 use tansa_protocol::response_collector_service_server::ResponseCollectorService;
@@ -17,11 +18,12 @@ use tonic::Status;
 use tower_layer::Identity;
 
 #[automock]
-pub trait ResponseCollector {
+pub trait ResponseCollector: Debug {
     fn get_port(&self) -> u16;
     fn collect(self: Box<Self>) -> BoxStream<'static, Result<Service, tonic::transport::Error>>;
 }
 
+#[derive(Debug)]
 pub struct GrpcResponseCollector {
     tcp: TcpListenerStream,
     port: u16,

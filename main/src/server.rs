@@ -8,50 +8,37 @@ use futures_util::TryStreamExt;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use tansa_protocol::DecodeError;
 use tansa_protocol::Request;
 use tansa_protocol::RequestDecoder;
 use tansa_protocol::Response;
 
-pub async fn serve(service_name: &str, service_port: u16) -> std::io::Result<()> {
-    let multicast_ip = *crate::get_multicast_address().ip();
-    let multicast_receiver = TokioMulticastReceiver::new(
-        crate::get_multicast_address().port(),
-        multicast_ip,
-        RequestDecoder,
-    )
-    .await?;
-    serve_internal(
-        service_name,
-        service_port,
-        multicast_receiver,
-        GrpcResponseSender,
-    )
-    .await
+pub async fn serve(discovery_port: u16, service_port: u16) -> Result<(), crate::Error> {
+    if discovery_port == 0 {
+        return Err(crate::Error::InvalidDiscoveryPort);
+    }
+    let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
+    let multicast_receiver = TokioMulticastReceiver::new(multicast_address, RequestDecoder).await?;
+    serve_internal(service_port, multicast_receiver, GrpcResponseSender).await
 }
 
 async fn serve_internal(
-    service_name: &str,
     service_port: u16,
     multicast_receiver: impl MulticastReceiver<Request, DecodeError>,
     response_sender: impl ResponseSender,
-) -> std::io::Result<()> {
+) -> Result<(), crate::Error> {
     let handle = |(request, remote_address): (_, SocketAddr)| {
-        handle_packet(
-            request,
-            remote_address.ip(),
-            service_name,
-            service_port,
-            &response_sender,
-        )
-        .inspect_err(|e| log::error!("Failed to handle a packet: {}", e))
-        .or_else(|_| async { Ok(()) })
+        handle_packet(request, remote_address.ip(), service_port, &response_sender)
+            .inspect_err(|e| log::error!("Failed to handle a packet: {}", e))
+            .or_else(|_| async { Ok(()) })
     };
     multicast_receiver
         .receive()
         .filter_map(|r| async { strip_protobuf_error(r) })
         .try_for_each_concurrent(0, handle)
         .await
+        .map_err(Into::into)
 }
 
 fn strip_protobuf_error(
@@ -70,15 +57,11 @@ fn strip_protobuf_error(
 async fn handle_packet(
     request: Request,
     remote_ip: IpAddr,
-    service_name: &str,
     service_port: u16,
     response_sender: &impl ResponseSender,
 ) -> anyhow::Result<()> {
     log::debug!("Received {:?} via multicast from {}", request, remote_ip);
     let remote_ip = unwrap_ipv6(remote_ip)?;
-    if service_name != request.service_name {
-        anyhow::bail!("Unknown service: {}", service_name);
-    }
     let response_collector_address =
         format!("http://[{}]:{}", remote_ip, request.response_collector_port);
     let response = Response {
@@ -117,7 +100,6 @@ mod test {
         crate::test::init();
 
         let request = Request {
-            service_name: "SERVICE".into(),
             response_collector_port: 3,
         };
         let request_address = "[::123]:2".parse().unwrap();
@@ -144,7 +126,6 @@ mod test {
 
         // when
         let result = serve_internal(
-            &request.service_name,
             expected_response.service_port.try_into().unwrap(),
             multicast_receiver,
             response_sender,
@@ -174,7 +155,7 @@ mod test {
             .return_once(|_, _| anyhow::bail!("Failed to send response"));
 
         // when
-        let result = serve_internal("", 1, multicast_receiver, response_sender).await;
+        let result = serve_internal(1, multicast_receiver, response_sender).await;
 
         // Then
         assert_server_exits_with_dummy_error(result);
@@ -203,7 +184,7 @@ mod test {
             .returning(|_, _| Ok(()));
 
         // when
-        let result = serve_internal("", 1, multicast_receiver, response_sender).await;
+        let result = serve_internal(1, multicast_receiver, response_sender).await;
 
         // Then
         assert_server_exits_with_dummy_error(result);
@@ -226,7 +207,7 @@ mod test {
         let response_sender = MockResponseSender::default();
 
         // when
-        let result = serve_internal("SERVICE", 1, multicast_receiver, response_sender).await;
+        let result = serve_internal(1, multicast_receiver, response_sender).await;
 
         // Then
         assert_server_exits_with_dummy_error(result);
@@ -237,7 +218,6 @@ mod test {
         crate::test::init();
 
         let request = Request {
-            service_name: "SERVICE".into(),
             response_collector_port: 3,
         };
         let request_address = "1.1.1.1:2".parse().unwrap();
@@ -250,30 +230,7 @@ mod test {
         let response_sender = MockResponseSender::default();
 
         // when
-        let result = serve_internal("", 1, multicast_receiver, response_sender).await;
-
-        // Then
-        assert_server_exits_with_dummy_error(result);
-    }
-
-    #[tokio::test]
-    async fn ignore_other_service_names() {
-        crate::test::init();
-
-        let request = Request {
-            service_name: "UNKNOWN".into(),
-            response_collector_port: 3,
-        };
-        let request_address = "[::123]:2".parse().unwrap();
-
-        let mut multicast_receiver = MockMulticastReceiver::default();
-        let requests = one_shot_request_ending_with_dummy_error(Ok((request, request_address)));
-        multicast_receiver.expect_receive().return_once(|| requests);
-
-        let response_sender = MockResponseSender::default();
-
-        // when
-        let result = serve_internal("SERVICE", 1, multicast_receiver, response_sender).await;
+        let result = serve_internal(1, multicast_receiver, response_sender).await;
 
         // Then
         assert_server_exits_with_dummy_error(result);
@@ -286,12 +243,14 @@ mod test {
         futures_util::stream::iter(requests).boxed()
     }
 
-    fn assert_server_exits_with_dummy_error(result: std::io::Result<()>) {
-        assert_eq!(
-            Other,
-            result.unwrap_err().kind(),
-            "Server must have exited with the dummy error supplied at the end of all requests"
-        );
+    fn assert_server_exits_with_dummy_error(result: Result<(), crate::Error>) {
+        if let crate::Error::NetworkIo(e) = result.unwrap_err() {
+            assert_eq!(
+                Other,
+                e.kind(),
+                "Server must have exited with the dummy error supplied at the end of all requests"
+            );
+        }
     }
 
     fn new_prost_decode_error() -> prost::DecodeError {

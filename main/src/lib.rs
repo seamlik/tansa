@@ -5,11 +5,21 @@ mod scanner;
 mod server;
 mod stream;
 
-use std::net::SocketAddrV6;
+use std::net::Ipv6Addr;
 
 pub use scanner::Scanner;
 pub use scanner::Service;
 pub use server::serve;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Invalid discovery port")]
+    InvalidDiscoveryPort,
+
+    #[error("Network I/O error")]
+    NetworkIo(#[from] std::io::Error),
+}
 
 /// IPv6 multicast address used in service discovery.
 ///
@@ -17,10 +27,8 @@ pub use server::serve;
 ///
 /// The multicast scope is set to 5 meaning organization-local networks.
 /// This scope covers LAN devices routed through VPNs.
-fn get_multicast_address() -> SocketAddrV6 {
-    "[FF05::F329:58AF]:50000"
-        .parse()
-        .expect("Invalid multicast address")
+fn get_discovery_ip() -> Ipv6Addr {
+    "FF05::F329:58AF".parse().expect("Invalid IP")
 }
 
 #[cfg(test)]

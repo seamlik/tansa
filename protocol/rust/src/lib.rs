@@ -38,7 +38,6 @@ mod test {
     #[test]
     fn decode_request() {
         let request = Request {
-            service_name: "SERVICE".into(),
             response_collector_port: 1,
         };
         let mut bytes = request.encode_to_vec().as_slice().into();

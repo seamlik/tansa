@@ -14,38 +14,41 @@ pub struct Service {
     pub address: SocketAddrV6,
 }
 
+#[derive(Debug)]
 pub struct Scanner {
-    service_name: String,
+    discovery_port: u16,
     response_collector: Box<dyn ResponseCollector>,
     multicast_sender: Arc<dyn MulticastSender + Send + Sync>,
 }
 
 impl Scanner {
-    pub async fn new(service_name: String) -> std::io::Result<Self> {
+    pub async fn new(discovery_port: u16) -> Result<Self, crate::Error> {
         Self::new_internal(
-            service_name,
+            discovery_port,
             Box::new(GrpcResponseCollector::new().await?),
             Arc::new(TokioMulticastSender),
         )
     }
     fn new_internal(
-        service_name: String,
+        discovery_port: u16,
         response_collector: Box<dyn ResponseCollector>,
         multicast_sender: Arc<dyn MulticastSender + Send + Sync>,
-    ) -> std::io::Result<Self> {
+    ) -> Result<Self, crate::Error> {
+        if discovery_port == 0 {
+            return Err(crate::Error::InvalidDiscoveryPort);
+        }
         Ok(Self {
-            service_name,
+            discovery_port,
             response_collector,
             multicast_sender,
         })
     }
     pub fn scan(self) -> impl Stream<Item = Result<Service, ScanError>> {
         let request = Request {
-            service_name: self.service_name,
             response_collector_port: self.response_collector.get_port().into(),
         };
         crate::stream::join(
-            Self::send_requests(self.multicast_sender, request),
+            Self::send_requests(self.multicast_sender, request, self.discovery_port),
             self.response_collector.collect(),
         )
     }
@@ -53,8 +56,9 @@ impl Scanner {
     async fn send_requests(
         multicast_sender: Arc<dyn MulticastSender + Send + Sync>,
         request: Request,
+        discovery_port: u16,
     ) -> Result<(), ScanError> {
-        let multicast_address = crate::get_multicast_address();
+        let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
         log::debug!(
             "Sending {:?} to multicast address {}",
             request,
@@ -101,9 +105,8 @@ mod test {
         ];
         let expected_services_clone = expected_services.clone();
 
-        let multicast_address = crate::get_multicast_address();
+        let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), 1, 0, 0);
         let request = Request {
-            service_name: "SERVICE".into(),
             response_collector_port: 1,
         };
         let request_packet: Arc<[u8]> = request.encode_to_vec().into();
@@ -125,7 +128,7 @@ mod test {
             .return_once(|_, _| async { Ok(()) }.boxed());
 
         let scanner = Scanner::new_internal(
-            request.service_name,
+            multicast_address.port(),
             Box::new(response_collector),
             Arc::new(multicast_sender),
         )
@@ -136,5 +139,24 @@ mod test {
 
         // Then
         assert_eq!(actual_services, expected_services);
+    }
+
+    #[tokio::test]
+    async fn invalid_discovery_port() {
+        crate::test::init();
+
+        // When
+        let e = Scanner::new_internal(
+            0,
+            Box::new(MockResponseCollector::new()),
+            Arc::new(MockMulticastSender::new()),
+        )
+        .unwrap_err();
+
+        // Then
+        if let crate::Error::InvalidDiscoveryPort = e {
+        } else {
+            panic!("0 must be an invalid discovery port");
+        }
     }
 }

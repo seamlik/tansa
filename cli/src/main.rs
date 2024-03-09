@@ -8,10 +8,10 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
     match Cli::parse().command {
         Command::Serve {
-            service_name,
+            discovery_port,
             service_port,
-        } => serve(&service_name, service_port).await,
-        Command::Scan { service_name } => scan(service_name).await,
+        } => serve(discovery_port, service_port).await,
+        Command::Scan { discovery_port } => scan(discovery_port).await,
     }
 }
 
@@ -25,24 +25,24 @@ struct Cli {
 enum Command {
     Serve {
         #[arg(long)]
-        service_name: String,
+        discovery_port: u16,
 
         #[arg(long)]
         service_port: u16,
     },
     Scan {
         #[arg(long)]
-        service_name: String,
+        discovery_port: u16,
     },
 }
 
-async fn serve(service_name: &str, service_port: u16) -> anyhow::Result<()> {
-    tansa::serve(service_name, service_port).await?;
+async fn serve(discovery_port: u16, service_port: u16) -> anyhow::Result<()> {
+    tansa::serve(discovery_port, service_port).await?;
     Ok(())
 }
 
-async fn scan(service_name: String) -> anyhow::Result<()> {
-    Scanner::new(service_name)
+async fn scan(discovery_port: u16) -> anyhow::Result<()> {
+    Scanner::new(discovery_port)
         .await?
         .scan()
         .try_for_each(|service| {

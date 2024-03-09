@@ -2,6 +2,7 @@ use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use futures_util::Stream;
 use mockall::automock;
+use std::fmt::Debug;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -27,15 +28,11 @@ impl<C> TokioMulticastReceiver<C>
 where
     C: Decoder,
 {
-    pub async fn new(
-        local_port: u16,
-        multicast_address: Ipv6Addr,
-        decoder: C,
-    ) -> std::io::Result<Self> {
-        let address = format!("[::]:{}", local_port);
-        log::info!("Binding `MulticastReceiver` socket at {}", address);
-        let socket = UdpSocket::bind(address).await?;
-        socket.join_multicast_v6(&multicast_address, 0)?;
+    pub async fn new(multicast_address: SocketAddrV6, decoder: C) -> std::io::Result<Self> {
+        let bind_address = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, multicast_address.port(), 0, 0);
+        log::info!("Binding `MulticastReceiver` socket at {}", bind_address);
+        let socket = UdpSocket::bind(bind_address).await?;
+        socket.join_multicast_v6(multicast_address.ip(), 0)?;
 
         // Multicast loop should be enabled only in test.
         // Disabling it reduces the chance of flooding and filters out echoes.
@@ -55,7 +52,7 @@ where
 }
 
 #[automock]
-pub trait MulticastSender {
+pub trait MulticastSender: Debug {
     fn send(
         &self,
         multicast_address: SocketAddrV6,
@@ -63,6 +60,7 @@ pub trait MulticastSender {
     ) -> BoxFuture<'static, std::io::Result<()>>;
 }
 
+#[derive(Debug)]
 pub struct TokioMulticastSender;
 
 impl TokioMulticastSender {
@@ -98,13 +96,11 @@ mod test {
     async fn multicast() {
         crate::test::init();
 
-        let address = crate::get_multicast_address();
+        let address = SocketAddrV6::new(crate::get_discovery_ip(), 50000, 0, 0);
         let expected_data = vec![1, 2, 3];
         let codec = BytesCodec::default();
 
-        let receiver = TokioMulticastReceiver::new(address.port(), *address.ip(), codec)
-            .await
-            .unwrap();
+        let receiver = TokioMulticastReceiver::new(address, codec).await.unwrap();
         receiver.socket.set_multicast_loop_v6(true).unwrap();
 
         let (actual_data, _) = crate::stream::join::<anyhow::Error, _, _, _, _, _, _>(
