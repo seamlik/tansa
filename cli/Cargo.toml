@@ -1,5 +1,5 @@
 [package]
-name = "cli"
+name = "tansa-cli"
 edition.workspace = true
 publish.workspace = true
 repository.workspace = true
