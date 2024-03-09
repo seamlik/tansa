@@ -23,14 +23,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Publishes a service to all connected LANs.
     Serve {
+        /// Port to listen for multicast requests from scanners.
         #[arg(long)]
         discovery_port: u16,
 
+        /// Port of the service you want to publish.
         #[arg(long)]
         service_port: u16,
     },
+
+    /// Scans for services in all connected LANs.
     Scan {
+        /// Port to send multicast requests to.
         #[arg(long)]
         discovery_port: u16,
     },
