@@ -2,6 +2,7 @@
 edition.workspace = true
 name = "tansa-protocol"
 publish.workspace = true
+repository.workspace = true
 version.workspace = true
 
 [dependencies]

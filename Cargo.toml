@@ -5,4 +5,5 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 publish = false
+repository = "https://github.com/seamlik/tansa"
 version = "0.1.0"
