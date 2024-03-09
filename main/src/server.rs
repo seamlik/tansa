@@ -10,32 +10,26 @@ use std::net::SocketAddrV6;
 use tansa_protocol::Request;
 use tansa_protocol::Response;
 
-pub async fn serve(
-    multicast_network_interface_indexes: impl IntoIterator<Item = u32>,
-    service_name: &str,
-    service_port: u16,
-) -> std::io::Result<()> {
+pub async fn serve(service_name: &str, service_port: u16) -> std::io::Result<()> {
+    let multicast_ip = *crate::get_multicast_address().ip();
+    let multicast_receiver =
+        TokioMulticastReceiver::new(64, crate::get_multicast_address().port(), multicast_ip)
+            .await?;
     serve_internal(
-        multicast_network_interface_indexes,
         service_name,
         service_port,
-        TokioMulticastReceiver::new(64, crate::get_multicast_address().port())?,
+        multicast_receiver,
         GrpcResponseSender,
     )
     .await
 }
 
 async fn serve_internal(
-    multicast_network_interface_indexes: impl IntoIterator<Item = u32>,
     service_name: &str,
     service_port: u16,
     multicast_receiver: impl MulticastReceiver,
     response_sender: impl ResponseSender,
 ) -> std::io::Result<()> {
-    let multicast_ip = *crate::get_multicast_address().ip();
-    multicast_network_interface_indexes
-        .into_iter()
-        .try_for_each(|i| multicast_receiver.join_multicast(multicast_ip, i))?;
     let receive = |_| async { Some(((multicast_receiver.receive().await), ())) };
     let handle = |(packet, remote_address): (_, SocketAddrV6)| {
         handle_packet(
@@ -94,7 +88,6 @@ mod test {
 
     #[tokio::test]
     async fn serve() {
-        let multicast_ip = *crate::get_multicast_address().ip();
         let request = Request {
             service_name: "SERVICE".into(),
             response_collector_port: 3,
@@ -110,14 +103,6 @@ mod test {
         ]
         .into_iter();
         multicast_receiver
-            .expect_join_multicast()
-            .with(eq(multicast_ip), eq(1))
-            .return_once_st(|_, _| Ok(()));
-        multicast_receiver
-            .expect_join_multicast()
-            .with(eq(multicast_ip), eq(2))
-            .return_once_st(|_, _| Ok(()));
-        multicast_receiver
             .expect_receive()
             .returning(move || requests.next().unwrap());
 
@@ -132,7 +117,6 @@ mod test {
 
         // when
         let result = serve_internal(
-            [1, 2],
             &request.service_name,
             expected_response.service_port.try_into().unwrap(),
             multicast_receiver,
@@ -155,9 +139,6 @@ mod test {
 
         let mut multicast_receiver = MockMulticastReceiver::default();
         multicast_receiver
-            .expect_join_multicast()
-            .return_once_st(|_, _| Ok(()));
-        multicast_receiver
             .expect_receive()
             .returning(move || requests.next().unwrap());
 
@@ -167,7 +148,7 @@ mod test {
             .return_once(|_, _| anyhow::bail!("Failed to send response"));
 
         // when
-        let result = serve_internal([1], "", 1, multicast_receiver, response_sender).await;
+        let result = serve_internal("", 1, multicast_receiver, response_sender).await;
 
         // Then
         assert_server_exits_with_dummy_error(result);
@@ -183,9 +164,6 @@ mod test {
 
         let mut multicast_receiver = MockMulticastReceiver::default();
         multicast_receiver
-            .expect_join_multicast()
-            .return_once_st(|_, _| Ok(()));
-        multicast_receiver
             .expect_receive()
             .returning(move || requests.next().unwrap());
 
@@ -196,7 +174,7 @@ mod test {
             .returning(|_, _| Ok(()));
 
         // when
-        let result = serve_internal([1], "", 1, multicast_receiver, response_sender).await;
+        let result = serve_internal("", 1, multicast_receiver, response_sender).await;
 
         // Then
         assert_server_exits_with_dummy_error(result);
@@ -217,16 +195,13 @@ mod test {
         ]
         .into_iter();
         multicast_receiver
-            .expect_join_multicast()
-            .returning(|_, _| Ok(()));
-        multicast_receiver
             .expect_receive()
             .returning(move || requests.next().unwrap());
 
         let response_sender = MockResponseSender::default();
 
         // when
-        let result = serve_internal([1], "SERVICE", 1, multicast_receiver, response_sender).await;
+        let result = serve_internal("SERVICE", 1, multicast_receiver, response_sender).await;
 
         // Then
         assert_server_exits_with_dummy_error(result);

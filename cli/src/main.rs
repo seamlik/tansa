@@ -1,5 +1,3 @@
-mod network;
-
 use clap::Parser;
 use clap::Subcommand;
 use futures_util::TryStreamExt;
@@ -39,14 +37,12 @@ enum Command {
 }
 
 async fn serve(service_name: &str, service_port: u16) -> anyhow::Result<()> {
-    let multicast_interface_indexes = crate::network::get_multicast_interface_indexes().await?;
-    tansa::serve(multicast_interface_indexes, service_name, service_port).await?;
+    tansa::serve(service_name, service_port).await?;
     Ok(())
 }
 
 async fn scan(service_name: String) -> anyhow::Result<()> {
-    let multicast_interface_indexes = crate::network::get_multicast_interface_indexes().await?;
-    Scanner::new(service_name, multicast_interface_indexes)
+    Scanner::new(service_name)
         .await?
         .scan()
         .try_for_each(|service| {

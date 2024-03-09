@@ -1,23 +1,14 @@
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use mockall::automock;
-use socket2::Domain;
-use socket2::Socket;
-use socket2::Type;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use std::net::UdpSocket as StdUdpSocket;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 
 #[automock]
 pub trait MulticastReceiver {
-    fn join_multicast(
-        &self,
-        multicast_ip: Ipv6Addr,
-        network_interface_index: u32,
-    ) -> std::io::Result<()>;
     async fn receive(&self) -> std::io::Result<(Vec<u8>, SocketAddrV6)>;
 }
 
@@ -27,35 +18,28 @@ pub struct TokioMulticastReceiver {
 }
 
 impl TokioMulticastReceiver {
-    pub fn new(buffer_size: usize, port: u16) -> std::io::Result<Self> {
-        let socket = new_multicast_socket()?;
+    pub async fn new(
+        buffer_size: usize,
+        local_port: u16,
+        multicast_address: Ipv6Addr,
+    ) -> std::io::Result<Self> {
+        let address = format!("[::]:{}", local_port);
+        log::info!("Binding `MulticastReceiver` socket at {}", address);
+        let socket = UdpSocket::bind(address).await?;
+        socket.join_multicast_v6(&multicast_address, 0)?;
 
-        let local_ip = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0);
-        log::info!("Binding multicast receiver socket at {}", local_ip);
-        socket.bind(&local_ip.into())?;
+        // Multicast loop should be enabled only in test.
+        // Disabling it reduces the chance of flooding and filters out echoes.
+        socket.set_multicast_loop_v6(false)?;
 
         Ok(Self {
-            socket: new_async_socket(socket)?,
+            socket,
             buffer_size,
         })
     }
 }
 
 impl MulticastReceiver for TokioMulticastReceiver {
-    fn join_multicast(
-        &self,
-        multicast_ip: Ipv6Addr,
-        network_interface_index: u32,
-    ) -> std::io::Result<()> {
-        log::info!(
-            "Joining multicast group {} on network interface {}",
-            multicast_ip,
-            network_interface_index
-        );
-        self.socket
-            .join_multicast_v6(&multicast_ip, network_interface_index)?;
-        Ok(())
-    }
     async fn receive(&self) -> std::io::Result<(Vec<u8>, SocketAddrV6)> {
         let mut buffer = Vec::default();
         buffer.resize(self.buffer_size, 0);
@@ -77,8 +61,7 @@ fn unwrap_ipv6(address: SocketAddr) -> SocketAddrV6 {
 pub trait MulticastSender {
     fn send(
         &self,
-        network_interface_index: u32,
-        destination: SocketAddrV6,
+        multicast_address: SocketAddrV6,
         data: Arc<[u8]>,
     ) -> BoxFuture<'static, std::io::Result<()>>;
 }
@@ -86,27 +69,19 @@ pub trait MulticastSender {
 pub struct TokioMulticastSender;
 
 impl TokioMulticastSender {
-    async fn send(
-        network_interface_index: u32,
-        destination: SocketAddrV6,
-        data: Arc<[u8]>,
-    ) -> std::io::Result<()> {
-        let socket = new_multicast_socket()?;
-        socket.set_multicast_if_v6(network_interface_index)?;
-        socket.set_multicast_loop_v6(false)?;
-
-        let local_ip = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
-        socket.bind(&local_ip.into())?;
-        log::debug!("Created multicast socket at {:?}", socket.local_addr()?);
+    async fn send(multicast_address: SocketAddrV6, data: Arc<[u8]>) -> std::io::Result<()> {
+        let socket = UdpSocket::bind("[::]:0").await?;
+        log::debug!(
+            "Created `MulticastSender` socket at {:?}",
+            socket.local_addr()?
+        );
+        socket.join_multicast_v6(multicast_address.ip(), 0)?;
 
         log::debug!(
-            "Sending packet from network interface {} to multicast address {}",
-            network_interface_index,
-            destination
+            "Sending packet to multicast address {}",
+            multicast_address
         );
-        new_async_socket(socket)?
-            .send_to(&data, destination)
-            .await?;
+        socket.send_to(&data, multicast_address).await?;
         Ok(())
     }
 }
@@ -114,29 +89,11 @@ impl TokioMulticastSender {
 impl MulticastSender for TokioMulticastSender {
     fn send(
         &self,
-        network_interface_index: u32,
-        destination: SocketAddrV6,
+        multicast_address: SocketAddrV6,
         data: Arc<[u8]>,
     ) -> BoxFuture<'static, std::io::Result<()>> {
-        Self::send(network_interface_index, destination, data).boxed()
+        Self::send(multicast_address, data).boxed()
     }
-}
-
-fn new_multicast_socket() -> std::io::Result<Socket> {
-    let socket = Socket::new(Domain::IPV6, Type::DGRAM, None)?;
-    socket.set_reuse_address(true)?;
-    socket.set_only_v6(true)?;
-
-    // Multicast loop should be enabled only in test.
-    // Disabling it reduces the chance of flooding and filters out echoes.
-    socket.set_multicast_loop_v6(false)?;
-
-    Ok(socket)
-}
-
-fn new_async_socket(socket: Socket) -> std::io::Result<UdpSocket> {
-    let socket: StdUdpSocket = socket.into();
-    socket.try_into()
 }
 
 #[cfg(test)]
@@ -148,23 +105,17 @@ mod test {
         let address = crate::get_multicast_address();
         let expected_data = vec![1, 2, 3];
 
-        let receiver = TokioMulticastReceiver::new(16, address.port()).unwrap();
+        let receiver = TokioMulticastReceiver::new(16, address.port(), *address.ip())
+            .await
+            .unwrap();
         receiver.socket.set_multicast_loop_v6(true).unwrap();
-        receiver.join_multicast(*address.ip(), 1).unwrap();
 
-        match futures_util::future::try_join(
-            TokioMulticastSender.send(1, address, expected_data.clone().into()),
+        let (_, (actual_data, _)) = futures_util::future::try_join(
+            TokioMulticastSender.send(address, expected_data.clone().into()),
             receiver.receive(),
         )
         .await
-        {
-            Ok((_, (actual_data, _))) => {
-                assert_eq!(expected_data, actual_data, "Must receive the packet back")
-            }
-            Err(e) if e.raw_os_error() == Some(101) => {
-                println!("Network unreachable, ignoring test result.")
-            }
-            Err(e) => panic!("Test failed: {}", e),
-        }
+        .unwrap();
+        assert_eq!(expected_data, actual_data, "Must receive the packet back");
     }
 }

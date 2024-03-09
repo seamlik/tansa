@@ -12,7 +12,6 @@ futures-util = "0.3"
 log = "0.4"
 mockall = "0.12"
 prost = "0.12"
-socket2 = "0.5"
 tansa-protocol = { path = "../protocol/rust" }
 thiserror = "1"
 tokio = "1"
