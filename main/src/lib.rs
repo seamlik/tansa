@@ -22,3 +22,15 @@ fn get_multicast_address() -> SocketAddrV6 {
         .parse()
         .expect("Invalid multicast address")
 }
+
+#[cfg(test)]
+mod test {
+    use log::LevelFilter::Info;
+
+    pub fn init() {
+        let _ = env_logger::builder()
+            .is_test(true)
+            .filter_level(Info)
+            .try_init();
+    }
+}

@@ -88,6 +88,8 @@ mod test {
 
     #[tokio::test]
     async fn serve() {
+        crate::test::init();
+
         let request = Request {
             service_name: "SERVICE".into(),
             response_collector_port: 3,
@@ -130,6 +132,8 @@ mod test {
 
     #[tokio::test]
     async fn failing_to_handle_packet_does_not_stop_serving() {
+        crate::test::init();
+
         let request_source_address = "[::123]:2".parse().unwrap();
         let mut requests = [
             Ok((vec![], request_source_address)),
@@ -156,6 +160,8 @@ mod test {
 
     #[tokio::test]
     async fn handle_many_requests() {
+        crate::test::init();
+
         let request_size = 128;
         let request_source_address = "[::123]:2".parse().unwrap();
         let mut requests = std::iter::repeat_with(move || Ok((vec![], request_source_address)))
@@ -182,6 +188,8 @@ mod test {
 
     #[tokio::test]
     async fn ignore_other_service_names() {
+        crate::test::init();
+
         let request = Request {
             service_name: "UNKNOWN".into(),
             response_collector_port: 3,

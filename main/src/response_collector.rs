@@ -127,6 +127,8 @@ mod test {
 
     #[tokio::test]
     async fn collect() {
+        crate::test::init();
+
         let collector = Box::new(GrpcResponseCollector::new().await.unwrap());
         let port = collector.get_port();
         let responses = vec![Response { service_port: 1 }, Response { service_port: 2 }];
@@ -147,6 +149,8 @@ mod test {
 
     #[tokio::test]
     async fn ip_unavailable() {
+        crate::test::init();
+
         let provider = new_response_collector_service_provider();
 
         // When
@@ -161,6 +165,8 @@ mod test {
 
     #[tokio::test]
     async fn ipv4_unsupported() {
+        crate::test::init();
+
         let provider = new_response_collector_service_provider();
 
         let mut request = Response::default().into_request();
@@ -179,6 +185,8 @@ mod test {
 
     #[tokio::test]
     async fn port_out_of_range() {
+        crate::test::init();
+
         let provider = new_response_collector_service_provider();
 
         let mut request = Response {
@@ -200,6 +208,8 @@ mod test {
 
     #[tokio::test]
     async fn port_must_not_be_0() {
+        crate::test::init();
+
         let provider = new_response_collector_service_provider();
 
         let mut request = Response { service_port: 0 }.into_request();
@@ -218,6 +228,8 @@ mod test {
 
     #[tokio::test]
     async fn unavailable() {
+        crate::test::init();
+
         let provider = new_response_collector_service_provider();
 
         let mut request = Response { service_port: 1 }.into_request();

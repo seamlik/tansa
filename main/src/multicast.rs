@@ -77,10 +77,7 @@ impl TokioMulticastSender {
         );
         socket.join_multicast_v6(multicast_address.ip(), 0)?;
 
-        log::debug!(
-            "Sending packet to multicast address {}",
-            multicast_address
-        );
+        log::debug!("Sending packet to multicast address {}", multicast_address);
         socket.send_to(&data, multicast_address).await?;
         Ok(())
     }
@@ -102,6 +99,8 @@ mod test {
 
     #[tokio::test]
     async fn multicast() {
+        crate::test::init();
+
         let address = crate::get_multicast_address();
         let expected_data = vec![1, 2, 3];
 

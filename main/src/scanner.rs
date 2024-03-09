@@ -89,6 +89,8 @@ mod test {
 
     #[tokio::test]
     async fn scan() {
+        crate::test::init();
+
         let expected_services = vec![
             Service {
                 address: "[::1]:1".parse().unwrap(),
