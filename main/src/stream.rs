@@ -6,10 +6,10 @@ use futures_util::TryFutureExt;
 use futures_util::TryStream;
 use futures_util::TryStreamExt;
 
-pub fn join<RE, F, S, I, FE, SE, FO>(future: F, stream: S) -> impl Stream<Item = Result<I, RE>>
+pub fn join<RE, F, S, SI, FE, SE, FI>(future: F, stream: S) -> impl Stream<Item = Result<SI, RE>>
 where
-    F: TryFuture<Ok = FO, Error = FE> + Send + 'static,
-    S: TryStream<Ok = I, Error = SE> + Send + 'static,
+    F: TryFuture<Ok = FI, Error = FE> + Send + 'static,
+    S: TryStream<Ok = SI, Error = SE> + Send + 'static,
     FE: Into<RE>,
     SE: Into<RE>,
 {
