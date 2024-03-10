@@ -1,6 +1,7 @@
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use futures_util::Stream;
+use futures_util::TryFutureExt;
 use mockall::automock;
 use std::fmt::Debug;
 use std::net::Ipv6Addr;
@@ -11,24 +12,24 @@ use tokio::net::UdpSocket;
 use tokio_util::codec::Decoder;
 use tokio_util::udp::UdpFramed;
 
-#[automock]
-pub trait MulticastReceiver<T, E> {
-    fn receive(self) -> impl Stream<Item = Result<(T, SocketAddr), E>>;
+pub trait MulticastReceiver {
+    fn receive<T, C, E>(
+        &self,
+        multicast_address: SocketAddrV6,
+        decoder: C,
+    ) -> impl Stream<Item = Result<(T, SocketAddr), E>> + Send + 'static
+    where
+        C: Decoder<Item = T, Error = E> + Send + 'static,
+        E: From<std::io::Error> + 'static;
 }
 
-pub struct TokioMulticastReceiver<C>
-where
-    C: Decoder,
-{
-    socket: UdpSocket,
-    decoder: C,
-}
+pub struct TokioMulticastReceiver;
 
-impl<C> TokioMulticastReceiver<C>
-where
-    C: Decoder,
-{
-    pub async fn new(multicast_address: SocketAddrV6, decoder: C) -> std::io::Result<Self> {
+impl TokioMulticastReceiver {
+    async fn new_socket<C>(
+        multicast_address: SocketAddrV6,
+        decoder: C,
+    ) -> std::io::Result<UdpFramed<C>> {
         let bind_address = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, multicast_address.port(), 0, 0);
         log::info!("Binding `MulticastReceiver` socket at {}", bind_address);
         let socket = UdpSocket::bind(bind_address).await?;
@@ -37,17 +38,28 @@ where
         // Multicast loop should be enabled only in test.
         // Disabling it reduces the chance of flooding and filters out echoes.
         socket.set_multicast_loop_v6(false)?;
+        #[cfg(test)]
+        {
+            socket.set_multicast_loop_v6(true)?;
+        }
 
-        Ok(Self { socket, decoder })
+        Ok(UdpFramed::new(socket, decoder))
     }
 }
 
-impl<T, C, E> MulticastReceiver<T, E> for TokioMulticastReceiver<C>
-where
-    C: Decoder<Item = T, Error = E>,
-{
-    fn receive(self) -> impl Stream<Item = Result<(T, SocketAddr), E>> {
-        UdpFramed::new(self.socket, self.decoder)
+impl MulticastReceiver for TokioMulticastReceiver {
+    fn receive<T, C, E>(
+        &self,
+        multicast_address: SocketAddrV6,
+        decoder: C,
+    ) -> impl Stream<Item = Result<(T, SocketAddr), E>> + Send + 'static
+    where
+        C: Decoder<Item = T, Error = E> + Send + 'static,
+        E: From<std::io::Error> + 'static,
+    {
+        Self::new_socket(multicast_address, decoder)
+            .err_into()
+            .try_flatten_stream()
     }
 }
 
@@ -100,12 +112,9 @@ mod test {
         let expected_data = vec![1, 2, 3];
         let codec = BytesCodec::default();
 
-        let receiver = TokioMulticastReceiver::new(address, codec).await.unwrap();
-        receiver.socket.set_multicast_loop_v6(true).unwrap();
-
         let (actual_data, _) = crate::stream::join::<anyhow::Error, _, _, _, _, _, _>(
             TokioMulticastSender.send(address, expected_data.clone().into()),
-            receiver.receive(),
+            TokioMulticastReceiver.receive(address, codec),
         )
         .boxed()
         .next()
