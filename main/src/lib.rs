@@ -6,22 +6,13 @@ mod scanner;
 mod server;
 mod stream;
 
-pub use scanner::scan;
-pub use scanner::ScanError;
-pub use scanner::Service;
-pub use server::serve;
+pub use crate::scanner::scan;
+pub use crate::scanner::ScanError;
+pub use crate::scanner::Service;
+pub use crate::server::serve;
+pub use crate::server::ServeError;
 
 use std::net::Ipv6Addr;
-use thiserror::Error;
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Invalid discovery port")]
-    InvalidDiscoveryPort,
-
-    #[error("Network I/O error")]
-    NetworkIo(#[from] std::io::Error),
-}
 
 /// IPv6 multicast address used in service discovery.
 ///

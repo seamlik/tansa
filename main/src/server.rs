@@ -11,8 +11,18 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use tansa_protocol::MulticastPacket;
 use tansa_protocol::Response;
+use thiserror::Error;
 
-pub async fn serve(discovery_port: u16, service_port: u16) -> Result<(), crate::Error> {
+#[derive(Error, Debug)]
+pub enum ServeError {
+    #[error("Invalid discovery port")]
+    InvalidDiscoveryPort,
+
+    #[error("Network I/O error")]
+    NetworkIo(#[from] std::io::Error),
+}
+
+pub async fn serve(discovery_port: u16, service_port: u16) -> Result<(), ServeError> {
     serve_internal(
         discovery_port,
         service_port,
@@ -29,9 +39,9 @@ async fn serve_internal(
     multicast_receiver: impl MulticastPacketReceiver,
     response_sender: impl ResponseSender,
     multicast_sender: impl MulticastSender,
-) -> Result<(), crate::Error> {
+) -> Result<(), crate::ServeError> {
     if discovery_port == 0 {
-        return Err(crate::Error::InvalidDiscoveryPort);
+        return Err(crate::ServeError::InvalidDiscoveryPort);
     }
 
     announce(discovery_port, service_port, multicast_sender).await?;
@@ -167,7 +177,7 @@ mod test {
         let e = super::serve(0, 1).await.unwrap_err();
 
         // Then
-        if let crate::Error::InvalidDiscoveryPort = e {
+        if let ServeError::InvalidDiscoveryPort = e {
         } else {
             panic!("0 must be an invalid discovery port");
         }
@@ -250,8 +260,8 @@ mod test {
         futures_util::stream::iter(requests).boxed()
     }
 
-    fn assert_server_exits_with_dummy_error(result: Result<(), crate::Error>) {
-        if let crate::Error::NetworkIo(e) = result.unwrap_err() {
+    fn assert_server_exits_with_dummy_error(result: Result<(), crate::ServeError>) {
+        if let ServeError::NetworkIo(e) = result.unwrap_err() {
             assert_eq!(
                 Other,
                 e.kind(),
