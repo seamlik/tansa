@@ -5,11 +5,12 @@ mod scanner;
 mod server;
 mod stream;
 
-use std::net::Ipv6Addr;
-
-pub use scanner::Scanner;
+pub use scanner::scan;
+pub use scanner::ScanError;
 pub use scanner::Service;
 pub use server::serve;
+
+use std::net::Ipv6Addr;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
