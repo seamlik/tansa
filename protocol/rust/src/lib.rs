@@ -26,7 +26,7 @@ where
             return Ok(None);
         }
 
-        Some(M::decode(src)).transpose().map_err(Into::into)
+        Ok(Some(M::decode(src)?))
     }
 }
 
