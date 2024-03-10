@@ -8,8 +8,8 @@ use futures_util::TryStreamExt;
 
 pub fn join<RE, F, S, SI, FE, SE, FI>(future: F, stream: S) -> impl Stream<Item = Result<SI, RE>>
 where
-    F: TryFuture<Ok = FI, Error = FE> + Send + 'static,
-    S: TryStream<Ok = SI, Error = SE> + Send + 'static,
+    F: TryFuture<Ok = FI, Error = FE>,
+    S: TryStream<Ok = SI, Error = SE>,
     FE: Into<RE>,
     SE: Into<RE>,
 {
