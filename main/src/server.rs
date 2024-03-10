@@ -1,9 +1,12 @@
+use crate::multicast::MulticastSender;
 use crate::multicast::TokioMulticastReceiver;
+use crate::multicast::TokioMulticastSender;
 use crate::packet::MulticastPacketReceiver;
 use crate::response_sender::GrpcResponseSender;
 use crate::response_sender::ResponseSender;
 use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
+use prost::Message;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use tansa_protocol::MulticastPacket;
@@ -15,6 +18,7 @@ pub async fn serve(discovery_port: u16, service_port: u16) -> Result<(), crate::
         service_port,
         TokioMulticastReceiver,
         GrpcResponseSender,
+        TokioMulticastSender,
     )
     .await
 }
@@ -24,11 +28,13 @@ async fn serve_internal(
     service_port: u16,
     multicast_receiver: impl MulticastPacketReceiver,
     response_sender: impl ResponseSender,
+    multicast_sender: impl MulticastSender,
 ) -> Result<(), crate::Error> {
     if discovery_port == 0 {
         return Err(crate::Error::InvalidDiscoveryPort);
     }
 
+    announce(discovery_port, service_port, multicast_sender).await?;
     let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
     let handle = |(request, remote_address): (_, SocketAddrV6)| {
         handle_packet(
@@ -45,6 +51,20 @@ async fn serve_internal(
         .try_for_each_concurrent(0, handle)
         .await
         .map_err(Into::into)
+}
+
+async fn announce(
+    discovery_port: u16,
+    service_port: u16,
+    multicast_sender: impl MulticastSender,
+) -> std::io::Result<()> {
+    let announcement: MulticastPacket = Response {
+        service_port: service_port.into(),
+    }
+    .into();
+    let bytes = announcement.encode_to_vec();
+    let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
+    multicast_sender.send(multicast_address, bytes.into()).await
 }
 
 async fn handle_packet(
@@ -75,12 +95,15 @@ async fn handle_packet(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::multicast::MockMulticastSender;
     use crate::packet::MockMulticastPacketReceiver;
     use crate::response_sender::MockResponseSender;
     use futures_util::stream::BoxStream;
+    use futures_util::FutureExt;
     use futures_util::StreamExt;
     use mockall::predicate::eq;
     use std::io::ErrorKind::Other;
+    use std::sync::Arc;
     use tansa_protocol::Request;
 
     const DISCOVERY_PORT: u16 = 50000;
@@ -94,8 +117,12 @@ mod test {
         }
         .into();
         let request_address = "[::123]:2".parse().unwrap();
+        let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), DISCOVERY_PORT, 0, 0);
 
-        let expected_response = Response { service_port: 10 };
+        let response = Response { service_port: 10 };
+        let response_bytes: Arc<[u8]> = MulticastPacket::from(response.clone())
+            .encode_to_vec()
+            .into();
 
         let mut multicast_receiver = MockMulticastPacketReceiver::default();
         let requests = [Ok((request.clone(), request_address)), Err(Other.into())];
@@ -107,17 +134,24 @@ mod test {
         response_sender
             .expect_send()
             .with(
-                eq(expected_response.clone()),
+                eq(response.clone()),
                 eq::<String>("http://[::123]:3".into()),
             )
             .return_once(|_, _| Ok(()));
 
+        let mut multicast_sender = MockMulticastSender::default();
+        multicast_sender
+            .expect_send()
+            .with(eq(multicast_address), eq(response_bytes.clone()))
+            .return_once(|_, _| async { Ok(()) }.boxed());
+
         // when
         let result = serve_internal(
             DISCOVERY_PORT,
-            expected_response.service_port.try_into().unwrap(),
+            response.service_port.try_into().unwrap(),
             multicast_receiver,
             response_sender,
+            multicast_sender,
         )
         .await;
 
@@ -160,7 +194,14 @@ mod test {
             .return_once(|_, _| anyhow::bail!("Failed to send response"));
 
         // when
-        let result = serve_internal(DISCOVERY_PORT, 1, multicast_receiver, response_sender).await;
+        let result = serve_internal(
+            DISCOVERY_PORT,
+            1,
+            multicast_receiver,
+            response_sender,
+            mock_multicast_sender(),
+        )
+        .await;
 
         // Then
         assert_server_exits_with_dummy_error(result);
@@ -189,7 +230,14 @@ mod test {
             .returning(|_, _| Ok(()));
 
         // when
-        let result = serve_internal(DISCOVERY_PORT, 1, multicast_receiver, response_sender).await;
+        let result = serve_internal(
+            DISCOVERY_PORT,
+            1,
+            multicast_receiver,
+            response_sender,
+            mock_multicast_sender(),
+        )
+        .await;
 
         // Then
         assert_server_exits_with_dummy_error(result);
@@ -210,5 +258,13 @@ mod test {
                 "Server must have exited with the dummy error supplied at the end of all requests"
             );
         }
+    }
+
+    fn mock_multicast_sender() -> impl MulticastSender {
+        let mut multicast_sender = MockMulticastSender::default();
+        multicast_sender
+            .expect_send()
+            .return_once(|_, _| async { Ok(()) }.boxed());
+        multicast_sender
     }
 }
