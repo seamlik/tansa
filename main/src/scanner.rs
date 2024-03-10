@@ -25,7 +25,6 @@ pub struct Service {
 pub fn scan(discovery_port: u16) -> impl Stream<Item = Result<Service, ScanError>> {
     GrpcResponseCollector::new()
         .err_into()
-        .map_ok(Box::new)
         .map_ok(move |c| {
             scan_internal(
                 discovery_port,
@@ -39,7 +38,7 @@ pub fn scan(discovery_port: u16) -> impl Stream<Item = Result<Service, ScanError
 
 fn scan_internal(
     discovery_port: u16,
-    response_collector: Box<dyn ResponseCollector>,
+    response_collector: impl ResponseCollector,
     multicast_sender: impl MulticastSender + Send + 'static,
     multicast_receiver: impl MulticastPacketReceiver + Send + 'static,
 ) -> BoxStream<'static, Result<Service, ScanError>> {
@@ -167,7 +166,6 @@ mod test {
                 .map(Ok)
                 .boxed()
         });
-        let response_collector = Box::new(response_collector);
 
         let mut multicast_sender = MockMulticastSender::default();
         multicast_sender
