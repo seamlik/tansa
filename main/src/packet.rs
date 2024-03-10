@@ -38,7 +38,10 @@ fn strip_protobuf_error(
         Ok(inner) => Some(Ok(inner)),
         Err(DecodeError::Io(e)) => Some(Err(e)),
         Err(DecodeError::Protobuf(e)) => {
-            log::debug!("Invalid Protocol Buffers packet for `Request`: {}", e);
+            log::debug!(
+                "Invalid Protocol Buffers packet for `MulticastPacket`: {}",
+                e
+            );
             None
         }
     }
