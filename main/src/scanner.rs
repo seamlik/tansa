@@ -67,14 +67,15 @@ async fn send_requests(
     discovery_port: u16,
 ) -> Result<(), ScanError> {
     let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
+    let packet: MulticastPacket = request.into();
     log::debug!(
         "Sending {:?} to multicast address {}",
-        request,
+        packet,
         multicast_address
     );
-    let packet: Arc<[u8]> = request.encode_to_vec().into();
+    let packet_bytes: Arc<[u8]> = packet.encode_to_vec().into();
     multicast_sender
-        .send(multicast_address, packet.clone())
+        .send(multicast_address, packet_bytes.clone())
         .await?;
     Ok(())
 }
@@ -155,7 +156,8 @@ mod test {
         let request = Request {
             response_collector_port: 100,
         };
-        let request_packet: Arc<[u8]> = request.encode_to_vec().into();
+        let packet: MulticastPacket = request.clone().into();
+        let packet_bytes: Arc<[u8]> = packet.encode_to_vec().into();
 
         let mut response_collector = MockResponseCollector::new();
         response_collector
@@ -170,7 +172,7 @@ mod test {
         let mut multicast_sender = MockMulticastSender::default();
         multicast_sender
             .expect_send()
-            .with(eq(multicast_address), eq(request_packet.clone()))
+            .with(eq(multicast_address), eq(packet_bytes.clone()))
             .return_once(|_, _| async { Ok(()) }.boxed());
 
         let mut multicast_receiver = MockMulticastPacketReceiver::default();
