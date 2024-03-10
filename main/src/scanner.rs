@@ -17,11 +17,13 @@ use tansa_protocol::MulticastPacket;
 use tansa_protocol::Request;
 use thiserror::Error;
 
+/// Service information discovered during [scan].
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Service {
     pub address: SocketAddrV6,
 }
 
+/// Scans for all services being published to `discovery_port`.
 pub fn scan(discovery_port: u16) -> impl Stream<Item = Result<Service, ScanError>> {
     GrpcResponseCollector::new()
         .err_into()
@@ -107,6 +109,7 @@ fn extract_service(packet: MulticastPacket, mut address: SocketAddrV6) -> anyhow
     Ok(Service { address })
 }
 
+/// Error during [scan].
 #[derive(Error, Debug)]
 pub enum ScanError {
     #[error("Invalid discovery port")]

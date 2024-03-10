@@ -1,3 +1,33 @@
+//! LAN service discovery over IPv6 multicast.
+//!
+//! # General steps of usage
+//!
+//! Like traditional applications operating in the local IP.
+//! When providing your service through network sockets, you must agree on a fixed port.
+//! However, when using this crate, that fixed port is called "discovery port."
+//! Your application can bind to a wildcard socket (like `0.0.0.0:0`),
+//! after which the operating system will give you a concrete random port known as "service port".
+//! You will then use [serve] to publish the service port to the discovery port.
+//! Other devices within the same LAN can use [scan] to discover it.
+//!
+//! # Caveat
+//!
+//! IPv4, both in discovery and application, is unsupported.
+//! This simplifies the implementation of this crate.
+//! Given that we are only talking about LAN which is more likely to support IPv6,
+//! it should not be a major limitation.
+//!
+//! # Frequently used terms
+//!
+//! * Discovery IP: The multicast IPv6 acting as rendezvous for service information.
+//!   It is hardcoded in this crate.
+//! * Discovery port: The port on the discovery IP acting as rendezvous for service information.
+//!   Each application must use its own discovery port.
+//! * Service port: The port to connect to your application.
+//!   It is usually randomly allocated by the operating system.
+//! * Service information: Necessary information you need to connect to a service you discoverd.
+//!   Usually contains the socket address accessible within the LAN you connect.
+
 mod multicast;
 mod packet;
 mod response_collector;

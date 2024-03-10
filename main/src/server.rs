@@ -13,6 +13,7 @@ use tansa_protocol::MulticastPacket;
 use tansa_protocol::Response;
 use thiserror::Error;
 
+/// Error during [serve].
 #[derive(Error, Debug)]
 pub enum ServeError {
     #[error("Invalid discovery port")]
@@ -22,6 +23,7 @@ pub enum ServeError {
     NetworkIo(#[from] std::io::Error),
 }
 
+/// Publishes the service provided at `service_port` to `discovery port`.
 pub async fn serve(discovery_port: u16, service_port: u16) -> Result<(), ServeError> {
     serve_internal(
         discovery_port,
