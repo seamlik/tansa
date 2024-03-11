@@ -28,7 +28,7 @@
 //! * Service information: Necessary information you need to connect to a service you discoverd.
 //!   Usually contains the socket address accessible within the LAN you connect.
 
-mod multicast;
+mod network;
 mod packet;
 mod response_collector;
 mod response_sender;

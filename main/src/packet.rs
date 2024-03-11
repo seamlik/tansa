@@ -1,4 +1,4 @@
-use crate::multicast::MulticastReceiver;
+use crate::network::multicast::MulticastReceiver;
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 use mockall::automock;

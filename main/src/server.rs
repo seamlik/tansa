@@ -1,6 +1,6 @@
-use crate::multicast::MulticastSender;
-use crate::multicast::TokioMulticastReceiver;
-use crate::multicast::TokioMulticastSender;
+use crate::network::multicast::MulticastSender;
+use crate::network::multicast::TokioMulticastReceiver;
+use crate::network::multicast::TokioMulticastSender;
 use crate::packet::DiscoveryPacketReceiver;
 use crate::response_sender::GrpcResponseSender;
 use crate::response_sender::ResponseSender;
@@ -107,7 +107,7 @@ async fn handle_packet(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::multicast::MockMulticastSender;
+    use crate::network::multicast::MockMulticastSender;
     use crate::packet::MockDiscoveryPacketReceiver;
     use crate::response_sender::MockResponseSender;
     use futures_util::stream::BoxStream;
