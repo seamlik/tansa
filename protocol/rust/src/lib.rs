@@ -2,7 +2,7 @@
 
 tonic::include_proto!("tw.seamlik.tansa.v1");
 
-use crate::multicast_packet::Payload;
+use crate::discovery_packet::Payload;
 use prost::bytes::BytesMut;
 use prost::Message;
 use std::marker::PhantomData;
@@ -30,7 +30,7 @@ where
     }
 }
 
-impl MulticastPacket {
+impl DiscoveryPacket {
     pub fn unwrap_request(self) -> Option<Request> {
         if let Some(Payload::Request(r)) = self.payload {
             Some(r)
@@ -47,7 +47,7 @@ impl MulticastPacket {
     }
 }
 
-impl From<Request> for MulticastPacket {
+impl From<Request> for DiscoveryPacket {
     fn from(value: Request) -> Self {
         Self {
             payload: Some(Payload::Request(value)),
@@ -55,7 +55,7 @@ impl From<Request> for MulticastPacket {
     }
 }
 
-impl From<Response> for MulticastPacket {
+impl From<Response> for DiscoveryPacket {
     fn from(value: Response) -> Self {
         Self {
             payload: Some(Payload::Announcement(value)),

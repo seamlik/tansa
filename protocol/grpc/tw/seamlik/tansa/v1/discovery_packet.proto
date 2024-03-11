@@ -5,7 +5,7 @@ package tw.seamlik.tansa.v1;
 import "tw/seamlik/tansa/v1/request.proto";
 import "tw/seamlik/tansa/v1/response.proto";
 
-message MulticastPacket {
+message DiscoveryPacket {
   oneof payload {
     Request request = 1;
     Response announcement = 2;

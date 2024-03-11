@@ -1,7 +1,7 @@
 use crate::multicast::MulticastSender;
 use crate::multicast::TokioMulticastReceiver;
 use crate::multicast::TokioMulticastSender;
-use crate::packet::MulticastPacketReceiver;
+use crate::packet::DiscoveryPacketReceiver;
 use crate::response_sender::GrpcResponseSender;
 use crate::response_sender::ResponseSender;
 use futures_util::TryFutureExt;
@@ -9,7 +9,7 @@ use futures_util::TryStreamExt;
 use prost::Message;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
-use tansa_protocol::MulticastPacket;
+use tansa_protocol::DiscoveryPacket;
 use tansa_protocol::Response;
 use thiserror::Error;
 
@@ -38,7 +38,7 @@ pub async fn serve(discovery_port: u16, service_port: u16) -> Result<(), ServeEr
 async fn serve_internal(
     discovery_port: u16,
     service_port: u16,
-    multicast_receiver: impl MulticastPacketReceiver,
+    multicast_receiver: impl DiscoveryPacketReceiver,
     response_sender: impl ResponseSender,
     multicast_sender: impl MulticastSender,
 ) -> Result<(), crate::ServeError> {
@@ -70,7 +70,7 @@ async fn announce(
     service_port: u16,
     multicast_sender: impl MulticastSender,
 ) -> std::io::Result<()> {
-    let announcement: MulticastPacket = Response {
+    let announcement: DiscoveryPacket = Response {
         service_port: service_port.into(),
     }
     .into();
@@ -80,7 +80,7 @@ async fn announce(
 }
 
 async fn handle_packet(
-    packet: MulticastPacket,
+    packet: DiscoveryPacket,
     remote_ip: Ipv6Addr,
     service_port: u16,
     response_sender: &impl ResponseSender,
@@ -108,7 +108,7 @@ async fn handle_packet(
 mod test {
     use super::*;
     use crate::multicast::MockMulticastSender;
-    use crate::packet::MockMulticastPacketReceiver;
+    use crate::packet::MockDiscoveryPacketReceiver;
     use crate::response_sender::MockResponseSender;
     use futures_util::stream::BoxStream;
     use futures_util::FutureExt;
@@ -124,7 +124,7 @@ mod test {
     async fn serve() {
         crate::test::init();
 
-        let request: MulticastPacket = Request {
+        let request: DiscoveryPacket = Request {
             response_collector_port: 3,
         }
         .into();
@@ -132,11 +132,11 @@ mod test {
         let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), DISCOVERY_PORT, 0, 0);
 
         let response = Response { service_port: 10 };
-        let response_bytes: Arc<[u8]> = MulticastPacket::from(response.clone())
+        let response_bytes: Arc<[u8]> = DiscoveryPacket::from(response.clone())
             .encode_to_vec()
             .into();
 
-        let mut multicast_receiver = MockMulticastPacketReceiver::default();
+        let mut multicast_receiver = MockDiscoveryPacketReceiver::default();
         let requests = [Ok((request.clone(), request_address)), Err(Other.into())];
         multicast_receiver
             .expect_receive()
@@ -191,7 +191,7 @@ mod test {
 
         let request_source_address = "[::123]:2".parse().unwrap();
 
-        let mut multicast_receiver = MockMulticastPacketReceiver::default();
+        let mut multicast_receiver = MockDiscoveryPacketReceiver::default();
         let requests = one_shot_request_ending_with_dummy_error(Ok((
             Request::default().into(),
             request_source_address,
@@ -230,7 +230,7 @@ mod test {
                 .take(request_size)
                 .chain(std::iter::once(Err(Other.into())));
 
-        let mut multicast_receiver = MockMulticastPacketReceiver::default();
+        let mut multicast_receiver = MockDiscoveryPacketReceiver::default();
         multicast_receiver
             .expect_receive()
             .return_once(|_| futures_util::stream::iter(requests).boxed());
@@ -256,8 +256,8 @@ mod test {
     }
 
     fn one_shot_request_ending_with_dummy_error(
-        request: Result<(MulticastPacket, SocketAddrV6), std::io::Error>,
-    ) -> BoxStream<'static, Result<(MulticastPacket, SocketAddrV6), std::io::Error>> {
+        request: Result<(DiscoveryPacket, SocketAddrV6), std::io::Error>,
+    ) -> BoxStream<'static, Result<(DiscoveryPacket, SocketAddrV6), std::io::Error>> {
         let requests = [request, Err(Other.into())];
         futures_util::stream::iter(requests).boxed()
     }

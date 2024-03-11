@@ -5,25 +5,25 @@ use mockall::automock;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tansa_protocol::DecodeError;
-use tansa_protocol::MulticastPacket;
+use tansa_protocol::DiscoveryPacket;
 use tansa_protocol::ProtobufDecoder;
 
 #[automock]
-pub trait MulticastPacketReceiver {
+pub trait DiscoveryPacketReceiver {
     fn receive(
         &self,
         multicast_address: SocketAddrV6,
-    ) -> BoxStream<'static, std::io::Result<(MulticastPacket, SocketAddrV6)>>;
+    ) -> BoxStream<'static, std::io::Result<(DiscoveryPacket, SocketAddrV6)>>;
 }
 
-impl<T> MulticastPacketReceiver for T
+impl<T> DiscoveryPacketReceiver for T
 where
     T: MulticastReceiver + Send,
 {
     fn receive(
         &self,
         multicast_address: SocketAddrV6,
-    ) -> BoxStream<'static, std::io::Result<(MulticastPacket, SocketAddrV6)>> {
+    ) -> BoxStream<'static, std::io::Result<(DiscoveryPacket, SocketAddrV6)>> {
         self.receive(multicast_address, ProtobufDecoder::default())
             .filter_map(|r| async { strip_protobuf_error(r) })
             .filter_map(|r| async { extract_ipv6(r) })
@@ -32,14 +32,14 @@ where
 }
 
 fn strip_protobuf_error(
-    result: Result<(MulticastPacket, SocketAddr), DecodeError>,
-) -> Option<std::io::Result<(MulticastPacket, SocketAddr)>> {
+    result: Result<(DiscoveryPacket, SocketAddr), DecodeError>,
+) -> Option<std::io::Result<(DiscoveryPacket, SocketAddr)>> {
     match result {
         Ok(inner) => Some(Ok(inner)),
         Err(DecodeError::Io(e)) => Some(Err(e)),
         Err(DecodeError::Protobuf(e)) => {
             log::debug!(
-                "Invalid Protocol Buffers packet for `MulticastPacket`: {}",
+                "Invalid Protocol Buffers packet for `DiscoveryPacket`: {}",
                 e
             );
             None
@@ -48,8 +48,8 @@ fn strip_protobuf_error(
 }
 
 fn extract_ipv6(
-    result: std::io::Result<(MulticastPacket, SocketAddr)>,
-) -> Option<std::io::Result<(MulticastPacket, SocketAddrV6)>> {
+    result: std::io::Result<(DiscoveryPacket, SocketAddr)>,
+) -> Option<std::io::Result<(DiscoveryPacket, SocketAddrV6)>> {
     match result {
         Ok((_, SocketAddr::V4(_))) => {
             log::debug!("Dropping a packet from IPv4");

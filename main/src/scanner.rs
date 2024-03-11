@@ -1,7 +1,7 @@
 use crate::multicast::MulticastSender;
 use crate::multicast::TokioMulticastReceiver;
 use crate::multicast::TokioMulticastSender;
-use crate::packet::MulticastPacketReceiver;
+use crate::packet::DiscoveryPacketReceiver;
 use crate::response_collector::GrpcResponseCollector;
 use crate::response_collector::ResponseCollector;
 use anyhow::Context;
@@ -13,7 +13,7 @@ use futures_util::TryStreamExt;
 use prost::Message;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
-use tansa_protocol::MulticastPacket;
+use tansa_protocol::DiscoveryPacket;
 use tansa_protocol::Request;
 use thiserror::Error;
 
@@ -42,7 +42,7 @@ fn scan_internal(
     discovery_port: u16,
     response_collector: impl ResponseCollector,
     multicast_sender: impl MulticastSender + Send + 'static,
-    multicast_receiver: impl MulticastPacketReceiver + Send + 'static,
+    multicast_receiver: impl DiscoveryPacketReceiver + Send + 'static,
 ) -> BoxStream<'static, Result<Service, ScanError>> {
     if discovery_port == 0 {
         return futures_util::stream::once(async { Err(ScanError::InvalidDiscoveryPort) }).boxed();
@@ -69,7 +69,7 @@ async fn send_requests(
     discovery_port: u16,
 ) -> Result<(), ScanError> {
     let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
-    let packet: MulticastPacket = request.into();
+    let packet: DiscoveryPacket = request.into();
     log::debug!(
         "Sending {:?} to multicast address {}",
         packet,
@@ -83,7 +83,7 @@ async fn send_requests(
 }
 
 fn receive_announcements(
-    multicast_receiver: impl MulticastPacketReceiver,
+    multicast_receiver: impl DiscoveryPacketReceiver,
     multicast_address: SocketAddrV6,
 ) -> impl Stream<Item = Result<Service, ScanError>> {
     multicast_receiver
@@ -97,7 +97,7 @@ fn receive_announcements(
         .filter_map(|r| async { r.transpose() })
 }
 
-fn extract_service(packet: MulticastPacket, mut address: SocketAddrV6) -> anyhow::Result<Service> {
+fn extract_service(packet: DiscoveryPacket, mut address: SocketAddrV6) -> anyhow::Result<Service> {
     let response = packet
         .unwrap_response()
         .ok_or_else(|| anyhow::anyhow!("Not an `Announcement`"))?;
@@ -126,13 +126,13 @@ pub enum ScanError {
 mod test {
     use super::*;
     use crate::multicast::MockMulticastSender;
-    use crate::packet::MockMulticastPacketReceiver;
+    use crate::packet::MockDiscoveryPacketReceiver;
     use crate::response_collector::MockResponseCollector;
     use futures_util::FutureExt;
     use futures_util::StreamExt;
     use futures_util::TryStreamExt;
     use mockall::predicate::eq;
-    use tansa_protocol::MulticastPacket;
+    use tansa_protocol::DiscoveryPacket;
     use tansa_protocol::Response;
 
     #[tokio::test]
@@ -149,9 +149,9 @@ mod test {
         ];
         let expected_services_clone = expected_services.clone();
 
-        let announcement: MulticastPacket = Response { service_port: 2 }.into();
+        let announcement: DiscoveryPacket = Response { service_port: 2 }.into();
         let announcement_address = "[::2]:10".parse().unwrap();
-        let multicast_packets =
+        let discovery_packets =
             futures_util::stream::once(async move { Ok((announcement, announcement_address)) })
                 .boxed();
 
@@ -159,7 +159,7 @@ mod test {
         let request = Request {
             response_collector_port: 100,
         };
-        let packet: MulticastPacket = request.clone().into();
+        let packet: DiscoveryPacket = request.clone().into();
         let packet_bytes: Arc<[u8]> = packet.encode_to_vec().into();
 
         let mut response_collector = MockResponseCollector::new();
@@ -178,11 +178,11 @@ mod test {
             .with(eq(multicast_address), eq(packet_bytes.clone()))
             .return_once(|_, _| async { Ok(()) }.boxed());
 
-        let mut multicast_receiver = MockMulticastPacketReceiver::default();
+        let mut multicast_receiver = MockDiscoveryPacketReceiver::default();
         multicast_receiver
             .expect_receive()
             .with(eq(multicast_address))
-            .return_once_st(move |_| multicast_packets);
+            .return_once_st(move |_| discovery_packets);
 
         // When
         let actual_services: Vec<_> = scan_internal(
