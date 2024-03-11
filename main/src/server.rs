@@ -4,10 +4,10 @@ use crate::network::multicast::TokioMulticastSender;
 use crate::packet::DiscoveryPacketReceiver;
 use crate::response_sender::GrpcResponseSender;
 use crate::response_sender::ResponseSender;
+use anyhow::Context;
 use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
 use prost::Message;
-use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use tansa_protocol::DiscoveryPacket;
 use tansa_protocol::Response;
@@ -49,14 +49,9 @@ async fn serve_internal(
     announce(discovery_port, service_port, multicast_sender).await?;
     let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
     let handle = |(request, remote_address): (_, SocketAddrV6)| {
-        handle_packet(
-            request,
-            *remote_address.ip(),
-            service_port,
-            &response_sender,
-        )
-        .inspect_err(|e| log::error!("Failed to handle a packet: {}", e))
-        .or_else(|_| async { Ok(()) })
+        handle_packet(request, remote_address, service_port, &response_sender)
+            .inspect_err(|e| log::error!("Failed to handle a packet: {}", e))
+            .or_else(|_| async { Ok(()) })
     };
     multicast_receiver
         .receive(multicast_address)
@@ -81,16 +76,24 @@ async fn announce(
 
 async fn handle_packet(
     packet: DiscoveryPacket,
-    remote_ip: Ipv6Addr,
+    remote_address: SocketAddrV6,
     service_port: u16,
     response_sender: &impl ResponseSender,
 ) -> anyhow::Result<()> {
-    log::debug!("Received {:?} via multicast from {}", packet, remote_ip);
+    log::debug!(
+        "Received {:?} via multicast from {}",
+        packet,
+        remote_address
+    );
     let request = packet
         .unwrap_request()
         .ok_or_else(|| anyhow::anyhow!("Not a `Request`"))?;
+    let response_collector_port = request
+        .response_collector_port
+        .try_into()
+        .context("Port out of range")?;
     let response_collector_address =
-        format!("http://[{}]:{}", remote_ip, request.response_collector_port);
+        get_response_collector_address(remote_address, response_collector_port);
     let response = Response {
         service_port: service_port.into(),
     };
@@ -102,6 +105,15 @@ async fn handle_packet(
     response_sender
         .send(response, response_collector_address)
         .await
+}
+
+fn get_response_collector_address(
+    packet_source_address: SocketAddrV6,
+    response_collector_port: u16,
+) -> String {
+    let mut address = packet_source_address;
+    address.set_port(response_collector_port);
+    format!("http://{}", address)
 }
 
 #[cfg(test)]
@@ -128,7 +140,7 @@ mod test {
             response_collector_port: 3,
         }
         .into();
-        let request_address = "[::123]:2".parse().unwrap();
+        let request_address = "[::123%456]:2".parse().unwrap();
         let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), DISCOVERY_PORT, 0, 0);
 
         let response = Response { service_port: 10 };
@@ -147,7 +159,7 @@ mod test {
             .expect_send()
             .with(
                 eq(response.clone()),
-                eq::<String>("http://[::123]:3".into()),
+                eq::<String>("http://[::123%456]:3".into()),
             )
             .return_once(|_, _| Ok(()));
 
@@ -161,6 +173,43 @@ mod test {
         let result = serve_internal(
             DISCOVERY_PORT,
             response.service_port.try_into().unwrap(),
+            multicast_receiver,
+            response_sender,
+            multicast_sender,
+        )
+        .await;
+
+        // Then
+        assert_server_exits_with_dummy_error(result);
+    }
+
+    #[tokio::test]
+    async fn port_out_of_range() {
+        crate::test::init();
+
+        let request: DiscoveryPacket = Request {
+            response_collector_port: 10000000,
+        }
+        .into();
+        let request_address = "[::123%456]:2".parse().unwrap();
+
+        let mut multicast_receiver = MockDiscoveryPacketReceiver::default();
+        let requests = [Ok((request.clone(), request_address)), Err(Other.into())];
+        multicast_receiver
+            .expect_receive()
+            .return_once(|_| futures_util::stream::iter(requests).boxed());
+
+        let response_sender = MockResponseSender::default();
+
+        let mut multicast_sender = MockMulticastSender::default();
+        multicast_sender
+            .expect_send()
+            .return_once(|_, _| async { Ok(()) }.boxed());
+
+        // when
+        let result = serve_internal(
+            DISCOVERY_PORT,
+            10,
             multicast_receiver,
             response_sender,
             multicast_sender,
