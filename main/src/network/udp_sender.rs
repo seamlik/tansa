@@ -7,9 +7,15 @@ use tokio::net::UdpSocket;
 
 #[automock]
 pub trait UdpSender {
-    fn send(
+    fn send_multicast(
         &self,
         multicast_address: SocketAddrV6,
+        data: Arc<[u8]>,
+    ) -> BoxFuture<'static, std::io::Result<()>>;
+
+    fn send_unicast(
+        &self,
+        unicast_address: SocketAddrV6,
         data: Arc<[u8]>,
     ) -> BoxFuture<'static, std::io::Result<()>>;
 }
@@ -17,21 +23,43 @@ pub trait UdpSender {
 pub struct TokioUdpSender;
 
 impl TokioUdpSender {
-    async fn send(multicast_address: SocketAddrV6, data: Arc<[u8]>) -> std::io::Result<()> {
-        let socket = UdpSocket::bind("[::]:0").await?;
-        log::debug!("Created `UdpSender` socket at {:?}", socket.local_addr()?);
+    async fn send_multicast(
+        multicast_address: SocketAddrV6,
+        data: Arc<[u8]>,
+    ) -> std::io::Result<()> {
+        let socket = Self::new_socket().await?;
         socket.join_multicast_v6(multicast_address.ip(), 0)?;
         socket.send_to(&data, multicast_address).await?;
         Ok(())
     }
+
+    async fn send_unicast(unicast_address: SocketAddrV6, data: Arc<[u8]>) -> std::io::Result<()> {
+        let socket = Self::new_socket().await?;
+        socket.send_to(&data, unicast_address).await?;
+        Ok(())
+    }
+
+    async fn new_socket() -> std::io::Result<UdpSocket> {
+        let socket = UdpSocket::bind("[::]:0").await?;
+        log::debug!("Created `UdpSender` socket at {:?}", socket.local_addr()?);
+        Ok(socket)
+    }
 }
 
 impl UdpSender for TokioUdpSender {
-    fn send(
+    fn send_multicast(
         &self,
         multicast_address: SocketAddrV6,
         data: Arc<[u8]>,
     ) -> BoxFuture<'static, std::io::Result<()>> {
-        Self::send(multicast_address, data).boxed()
+        Self::send_multicast(multicast_address, data).boxed()
+    }
+
+    fn send_unicast(
+        &self,
+        unicast_address: SocketAddrV6,
+        data: Arc<[u8]>,
+    ) -> BoxFuture<'static, std::io::Result<()>> {
+        Self::send_unicast(unicast_address, data).boxed()
     }
 }

@@ -75,7 +75,7 @@ mod test {
         let codec = BytesCodec::default();
 
         let (actual_data, _) = crate::stream::join::<anyhow::Error, _, _, _, _, _, _>(
-            TokioUdpSender.send(address, expected_data.clone().into()),
+            TokioUdpSender.send_multicast(address, expected_data.clone().into()),
             TokioMulticastReceiver.receive(address, codec),
         )
         .boxed()

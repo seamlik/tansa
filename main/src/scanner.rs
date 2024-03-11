@@ -49,11 +49,7 @@ fn scan_internal(
         response_collector.collect().map_err(Into::into),
         receive_announcements(multicast_receiver, multicast_address),
     );
-    crate::stream::join(
-        send_requests(udp_sender, request, discovery_port),
-        services,
-    )
-    .boxed()
+    crate::stream::join(send_requests(udp_sender, request, discovery_port), services).boxed()
 }
 
 async fn send_requests(
@@ -70,7 +66,7 @@ async fn send_requests(
     );
     let packet_bytes: Arc<[u8]> = packet.encode_to_vec().into();
     udp_sender
-        .send(multicast_address, packet_bytes.clone())
+        .send_multicast(multicast_address, packet_bytes.clone())
         .await?;
     Ok(())
 }
@@ -167,7 +163,7 @@ mod test {
 
         let mut udp_sender = MockUdpSender::default();
         udp_sender
-            .expect_send()
+            .expect_send_multicast()
             .with(eq(multicast_address), eq(packet_bytes.clone()))
             .return_once(|_, _| async { Ok(()) }.boxed());
 

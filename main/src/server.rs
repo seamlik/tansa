@@ -71,7 +71,9 @@ async fn announce(
     .into();
     let bytes = announcement.encode_to_vec();
     let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
-    udp_sender.send(multicast_address, bytes.into()).await
+    udp_sender
+        .send_multicast(multicast_address, bytes.into())
+        .await
 }
 
 async fn handle_packet(
@@ -165,7 +167,7 @@ mod test {
 
         let mut udp_sender = MockUdpSender::default();
         udp_sender
-            .expect_send()
+            .expect_send_multicast()
             .with(eq(multicast_address), eq(response_bytes.clone()))
             .return_once(|_, _| async { Ok(()) }.boxed());
 
@@ -203,7 +205,7 @@ mod test {
 
         let mut udp_sender = MockUdpSender::default();
         udp_sender
-            .expect_send()
+            .expect_send_multicast()
             .return_once(|_, _| async { Ok(()) }.boxed());
 
         // when
@@ -324,7 +326,7 @@ mod test {
     fn mock_udp_sender() -> impl UdpSender {
         let mut udp_sender = MockUdpSender::default();
         udp_sender
-            .expect_send()
+            .expect_send_multicast()
             .return_once(|_, _| async { Ok(()) }.boxed());
         udp_sender
     }
