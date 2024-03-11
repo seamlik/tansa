@@ -1,6 +1,6 @@
-use crate::network::multicast::MulticastSender;
 use crate::network::multicast::TokioMulticastReceiver;
-use crate::network::multicast::TokioMulticastSender;
+use crate::network::udp_sender::TokioUdpSender;
+use crate::network::udp_sender::UdpSender;
 use crate::packet::DiscoveryPacketReceiver;
 use crate::response_collector::GrpcResponseCollector;
 use crate::response_collector::ResponseCollector;
@@ -27,21 +27,14 @@ pub struct Service {
 pub fn scan(discovery_port: u16) -> impl Stream<Item = Result<Service, ScanError>> {
     GrpcResponseCollector::new()
         .err_into()
-        .map_ok(move |c| {
-            scan_internal(
-                discovery_port,
-                c,
-                TokioMulticastSender,
-                TokioMulticastReceiver,
-            )
-        })
+        .map_ok(move |c| scan_internal(discovery_port, c, TokioUdpSender, TokioMulticastReceiver))
         .try_flatten_stream()
 }
 
 fn scan_internal(
     discovery_port: u16,
     response_collector: impl ResponseCollector,
-    multicast_sender: impl MulticastSender + Send + 'static,
+    udp_sender: impl UdpSender + Send + 'static,
     multicast_receiver: impl DiscoveryPacketReceiver + Send + 'static,
 ) -> BoxStream<'static, Result<Service, ScanError>> {
     if discovery_port == 0 {
@@ -57,14 +50,14 @@ fn scan_internal(
         receive_announcements(multicast_receiver, multicast_address),
     );
     crate::stream::join(
-        send_requests(multicast_sender, request, discovery_port),
+        send_requests(udp_sender, request, discovery_port),
         services,
     )
     .boxed()
 }
 
 async fn send_requests(
-    multicast_sender: impl MulticastSender,
+    udp_sender: impl UdpSender,
     request: Request,
     discovery_port: u16,
 ) -> Result<(), ScanError> {
@@ -76,7 +69,7 @@ async fn send_requests(
         multicast_address
     );
     let packet_bytes: Arc<[u8]> = packet.encode_to_vec().into();
-    multicast_sender
+    udp_sender
         .send(multicast_address, packet_bytes.clone())
         .await?;
     Ok(())
@@ -125,7 +118,7 @@ pub enum ScanError {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::network::multicast::MockMulticastSender;
+    use crate::network::udp_sender::MockUdpSender;
     use crate::packet::MockDiscoveryPacketReceiver;
     use crate::response_collector::MockResponseCollector;
     use futures_util::FutureExt;
@@ -172,8 +165,8 @@ mod test {
                 .boxed()
         });
 
-        let mut multicast_sender = MockMulticastSender::default();
-        multicast_sender
+        let mut udp_sender = MockUdpSender::default();
+        udp_sender
             .expect_send()
             .with(eq(multicast_address), eq(packet_bytes.clone()))
             .return_once(|_, _| async { Ok(()) }.boxed());
@@ -188,7 +181,7 @@ mod test {
         let actual_services: Vec<_> = scan_internal(
             multicast_address.port(),
             response_collector,
-            multicast_sender,
+            udp_sender,
             multicast_receiver,
         )
         .take(3)

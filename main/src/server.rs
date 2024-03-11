@@ -1,6 +1,6 @@
-use crate::network::multicast::MulticastSender;
 use crate::network::multicast::TokioMulticastReceiver;
-use crate::network::multicast::TokioMulticastSender;
+use crate::network::udp_sender::TokioUdpSender;
+use crate::network::udp_sender::UdpSender;
 use crate::packet::DiscoveryPacketReceiver;
 use crate::response_sender::GrpcResponseSender;
 use crate::response_sender::ResponseSender;
@@ -30,7 +30,7 @@ pub async fn serve(discovery_port: u16, service_port: u16) -> Result<(), ServeEr
         service_port,
         TokioMulticastReceiver,
         GrpcResponseSender,
-        TokioMulticastSender,
+        TokioUdpSender,
     )
     .await
 }
@@ -40,13 +40,13 @@ async fn serve_internal(
     service_port: u16,
     multicast_receiver: impl DiscoveryPacketReceiver,
     response_sender: impl ResponseSender,
-    multicast_sender: impl MulticastSender,
+    udp_sender: impl UdpSender,
 ) -> Result<(), crate::ServeError> {
     if discovery_port == 0 {
         return Err(crate::ServeError::InvalidDiscoveryPort);
     }
 
-    announce(discovery_port, service_port, multicast_sender).await?;
+    announce(discovery_port, service_port, udp_sender).await?;
     let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
     let handle = |(request, remote_address): (_, SocketAddrV6)| {
         handle_packet(request, remote_address, service_port, &response_sender)
@@ -63,7 +63,7 @@ async fn serve_internal(
 async fn announce(
     discovery_port: u16,
     service_port: u16,
-    multicast_sender: impl MulticastSender,
+    udp_sender: impl UdpSender,
 ) -> std::io::Result<()> {
     let announcement: DiscoveryPacket = Response {
         service_port: service_port.into(),
@@ -71,7 +71,7 @@ async fn announce(
     .into();
     let bytes = announcement.encode_to_vec();
     let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
-    multicast_sender.send(multicast_address, bytes.into()).await
+    udp_sender.send(multicast_address, bytes.into()).await
 }
 
 async fn handle_packet(
@@ -119,7 +119,7 @@ fn get_response_collector_address(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::network::multicast::MockMulticastSender;
+    use crate::network::udp_sender::MockUdpSender;
     use crate::packet::MockDiscoveryPacketReceiver;
     use crate::response_sender::MockResponseSender;
     use futures_util::stream::BoxStream;
@@ -163,8 +163,8 @@ mod test {
             )
             .return_once(|_, _| Ok(()));
 
-        let mut multicast_sender = MockMulticastSender::default();
-        multicast_sender
+        let mut udp_sender = MockUdpSender::default();
+        udp_sender
             .expect_send()
             .with(eq(multicast_address), eq(response_bytes.clone()))
             .return_once(|_, _| async { Ok(()) }.boxed());
@@ -175,7 +175,7 @@ mod test {
             response.service_port.try_into().unwrap(),
             multicast_receiver,
             response_sender,
-            multicast_sender,
+            udp_sender,
         )
         .await;
 
@@ -201,8 +201,8 @@ mod test {
 
         let response_sender = MockResponseSender::default();
 
-        let mut multicast_sender = MockMulticastSender::default();
-        multicast_sender
+        let mut udp_sender = MockUdpSender::default();
+        udp_sender
             .expect_send()
             .return_once(|_, _| async { Ok(()) }.boxed());
 
@@ -212,7 +212,7 @@ mod test {
             10,
             multicast_receiver,
             response_sender,
-            multicast_sender,
+            udp_sender,
         )
         .await;
 
@@ -260,7 +260,7 @@ mod test {
             1,
             multicast_receiver,
             response_sender,
-            mock_multicast_sender(),
+            mock_udp_sender(),
         )
         .await;
 
@@ -296,7 +296,7 @@ mod test {
             1,
             multicast_receiver,
             response_sender,
-            mock_multicast_sender(),
+            mock_udp_sender(),
         )
         .await;
 
@@ -321,11 +321,11 @@ mod test {
         }
     }
 
-    fn mock_multicast_sender() -> impl MulticastSender {
-        let mut multicast_sender = MockMulticastSender::default();
-        multicast_sender
+    fn mock_udp_sender() -> impl UdpSender {
+        let mut udp_sender = MockUdpSender::default();
+        udp_sender
             .expect_send()
             .return_once(|_, _| async { Ok(()) }.boxed());
-        multicast_sender
+        udp_sender
     }
 }

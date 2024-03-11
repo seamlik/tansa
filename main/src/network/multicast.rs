@@ -1,12 +1,8 @@
-use futures_util::future::BoxFuture;
-use futures_util::FutureExt;
 use futures_util::Stream;
 use futures_util::TryFutureExt;
-use mockall::automock;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio_util::codec::Decoder;
 use tokio_util::udp::UdpFramed;
@@ -62,43 +58,11 @@ impl MulticastReceiver for TokioMulticastReceiver {
     }
 }
 
-#[automock]
-pub trait MulticastSender {
-    fn send(
-        &self,
-        multicast_address: SocketAddrV6,
-        data: Arc<[u8]>,
-    ) -> BoxFuture<'static, std::io::Result<()>>;
-}
-
-pub struct TokioMulticastSender;
-
-impl TokioMulticastSender {
-    async fn send(multicast_address: SocketAddrV6, data: Arc<[u8]>) -> std::io::Result<()> {
-        let socket = UdpSocket::bind("[::]:0").await?;
-        log::debug!(
-            "Created `MulticastSender` socket at {:?}",
-            socket.local_addr()?
-        );
-        socket.join_multicast_v6(multicast_address.ip(), 0)?;
-        socket.send_to(&data, multicast_address).await?;
-        Ok(())
-    }
-}
-
-impl MulticastSender for TokioMulticastSender {
-    fn send(
-        &self,
-        multicast_address: SocketAddrV6,
-        data: Arc<[u8]>,
-    ) -> BoxFuture<'static, std::io::Result<()>> {
-        Self::send(multicast_address, data).boxed()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::network::udp_sender::TokioUdpSender;
+    use crate::network::udp_sender::UdpSender;
     use futures_util::StreamExt;
     use tokio_util::codec::BytesCodec;
 
@@ -111,7 +75,7 @@ mod test {
         let codec = BytesCodec::default();
 
         let (actual_data, _) = crate::stream::join::<anyhow::Error, _, _, _, _, _, _>(
-            TokioMulticastSender.send(address, expected_data.clone().into()),
+            TokioUdpSender.send(address, expected_data.clone().into()),
             TokioMulticastReceiver.receive(address, codec),
         )
         .boxed()
