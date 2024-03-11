@@ -3,7 +3,6 @@ use futures_util::FutureExt;
 use futures_util::Stream;
 use futures_util::TryFutureExt;
 use mockall::automock;
-use std::fmt::Debug;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -64,7 +63,7 @@ impl MulticastReceiver for TokioMulticastReceiver {
 }
 
 #[automock]
-pub trait MulticastSender: Debug {
+pub trait MulticastSender {
     fn send(
         &self,
         multicast_address: SocketAddrV6,
@@ -72,7 +71,6 @@ pub trait MulticastSender: Debug {
     ) -> BoxFuture<'static, std::io::Result<()>>;
 }
 
-#[derive(Debug)]
 pub struct TokioMulticastSender;
 
 impl TokioMulticastSender {
