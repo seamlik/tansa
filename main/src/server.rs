@@ -1,3 +1,7 @@
+use crate::network::link_local::DummyIpNeighborScanner;
+use crate::network::link_local::IpNeighbor;
+use crate::network::link_local::IpNeighborScanError;
+use crate::network::link_local::IpNeighborScanner;
 use crate::network::multicast::TokioMulticastReceiver;
 use crate::network::udp_sender::TokioUdpSender;
 use crate::network::udp_sender::UdpSender;
@@ -9,6 +13,7 @@ use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
 use prost::Message;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use tansa_protocol::DiscoveryPacket;
 use tansa_protocol::Response;
 use thiserror::Error;
@@ -21,6 +26,9 @@ pub enum ServeError {
 
     #[error("Network I/O error")]
     NetworkIo(#[from] std::io::Error),
+
+    #[error("Failed to scan for IP neighbors")]
+    IpNeighbor(#[from] IpNeighborScanError),
 }
 
 /// Publishes the service provided at `service_port` to `discovery port`.
@@ -31,6 +39,7 @@ pub async fn serve(discovery_port: u16, service_port: u16) -> Result<(), ServeEr
         TokioMulticastReceiver,
         GrpcResponseSender,
         TokioUdpSender,
+        Box::new(DummyIpNeighborScanner),
     )
     .await
 }
@@ -41,13 +50,20 @@ async fn serve_internal(
     multicast_receiver: impl DiscoveryPacketReceiver,
     response_sender: impl ResponseSender,
     udp_sender: impl UdpSender,
+    ip_neighbor_scanner: Box<dyn IpNeighborScanner>,
 ) -> Result<(), crate::ServeError> {
     if discovery_port == 0 {
         return Err(crate::ServeError::InvalidDiscoveryPort);
     }
 
-    announce(discovery_port, service_port, udp_sender).await?;
     let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
+    announce(
+        multicast_address,
+        service_port,
+        udp_sender,
+        ip_neighbor_scanner,
+    )
+    .await?;
     let handle = |(request, remote_address): (_, SocketAddrV6)| {
         handle_packet(request, remote_address, service_port, &response_sender)
             .inspect_err(|e| log::error!("Failed to handle a packet: {}", e))
@@ -61,18 +77,42 @@ async fn serve_internal(
 }
 
 async fn announce(
-    discovery_port: u16,
+    multicast_address: SocketAddrV6,
     service_port: u16,
     udp_sender: impl UdpSender,
-) -> std::io::Result<()> {
+    ip_neighbor_scanner: Box<dyn IpNeighborScanner>,
+) -> Result<(), ServeError> {
+    let neighbors = ip_neighbor_scanner.scan().await?;
     let announcement: DiscoveryPacket = Response {
         service_port: service_port.into(),
     }
     .into();
-    let bytes = announcement.encode_to_vec();
-    let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
+    let announcement_bytes: Arc<[u8]> = announcement.encode_to_vec().into();
     udp_sender
-        .send_multicast(multicast_address, bytes.into())
+        .send_multicast(multicast_address, announcement_bytes.clone())
+        .await?;
+    announce_to_ip_neighbors(
+        multicast_address.port(),
+        neighbors,
+        announcement_bytes,
+        udp_sender,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn announce_to_ip_neighbors(
+    discovery_port: u16,
+    neighbors: Vec<IpNeighbor>,
+    data: Arc<[u8]>,
+    udp_sender: impl UdpSender,
+) -> std::io::Result<()> {
+    let tasks = neighbors
+        .into_iter()
+        .map(|n| n.get_socket_address(discovery_port))
+        .map(|a| udp_sender.send_unicast(a, data.clone()));
+    futures_util::future::try_join_all(tasks)
+        .map_ok(|_| ())
         .await
 }
 
@@ -121,6 +161,7 @@ fn get_response_collector_address(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::network::link_local::MockIpNeighborScanner;
     use crate::network::udp_sender::MockUdpSender;
     use crate::packet::MockDiscoveryPacketReceiver;
     use crate::response_sender::MockResponseSender;
@@ -144,6 +185,16 @@ mod test {
         .into();
         let request_address = "[::123%456]:2".parse().unwrap();
         let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), DISCOVERY_PORT, 0, 0);
+        let ip_neighbors = vec![
+            IpNeighbor {
+                address: "::A".parse().unwrap(),
+                network_interface_index: 1000,
+            },
+            IpNeighbor {
+                address: "::B".parse().unwrap(),
+                network_interface_index: 1001,
+            },
+        ];
 
         let response = Response { service_port: 10 };
         let response_bytes: Arc<[u8]> = DiscoveryPacket::from(response.clone())
@@ -170,6 +221,25 @@ mod test {
             .expect_send_multicast()
             .with(eq(multicast_address), eq(response_bytes.clone()))
             .return_once(|_, _| async { Ok(()) }.boxed());
+        udp_sender
+            .expect_send_unicast()
+            .with(
+                eq("[::A%1000]:50000".parse::<SocketAddrV6>().unwrap()),
+                eq(response_bytes.clone()),
+            )
+            .return_once(|_, _| async { Ok(()) }.boxed());
+        udp_sender
+            .expect_send_unicast()
+            .with(
+                eq("[::B%1001]:50000".parse::<SocketAddrV6>().unwrap()),
+                eq(response_bytes.clone()),
+            )
+            .return_once(|_, _| async { Ok(()) }.boxed());
+
+        let mut ip_neighbor_scanner = MockIpNeighborScanner::default();
+        ip_neighbor_scanner
+            .expect_scan()
+            .return_once(|| async { Ok(ip_neighbors) }.boxed());
 
         // when
         let result = serve_internal(
@@ -178,6 +248,7 @@ mod test {
             multicast_receiver,
             response_sender,
             udp_sender,
+            Box::new(ip_neighbor_scanner),
         )
         .await;
 
@@ -215,6 +286,7 @@ mod test {
             multicast_receiver,
             response_sender,
             udp_sender,
+            mock_ip_neighbor_scanner(),
         )
         .await;
 
@@ -263,6 +335,7 @@ mod test {
             multicast_receiver,
             response_sender,
             mock_udp_sender(),
+            mock_ip_neighbor_scanner(),
         )
         .await;
 
@@ -299,6 +372,7 @@ mod test {
             multicast_receiver,
             response_sender,
             mock_udp_sender(),
+            mock_ip_neighbor_scanner(),
         )
         .await;
 
@@ -329,5 +403,13 @@ mod test {
             .expect_send_multicast()
             .return_once(|_, _| async { Ok(()) }.boxed());
         udp_sender
+    }
+
+    fn mock_ip_neighbor_scanner() -> Box<dyn IpNeighborScanner> {
+        let mut scanner = MockIpNeighborScanner::default();
+        scanner
+            .expect_scan()
+            .return_once(|| async { Ok(vec![]) }.boxed());
+        Box::new(scanner)
     }
 }
