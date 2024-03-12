@@ -1,3 +1,8 @@
+mod windows;
+
+use self::windows::PowerShellIpNeighborScanner;
+use crate::os::OperatingSystem;
+use crate::process::ProcessError;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use mockall::automock;
@@ -7,7 +12,11 @@ use thiserror::Error;
 
 pub async fn ip_neighbor_scanner() -> Box<dyn IpNeighborScanner> {
     match crate::os::detect_operating_system().await {
-        Ok(_) => Box::new(DummyIpNeighborScanner), // TODO
+        Ok(OperatingSystem::Windows) => Box::new(PowerShellIpNeighborScanner),
+        Ok(_) => {
+            log::info!("Unsupported operating system, disabling IP neighbor discovery.");
+            Box::new(DummyIpNeighborScanner)
+        }
         Err(e) => {
             log::warn!("Failed to detect operating system: {}", e);
             log::info!("Unknown operating system, disabling IP neighbor discovery.");
@@ -17,7 +26,13 @@ pub async fn ip_neighbor_scanner() -> Box<dyn IpNeighborScanner> {
 }
 
 #[derive(Error, Debug)]
-pub enum IpNeighborScanError {}
+pub enum IpNeighborScanError {
+    #[error("Failed in running an external command")]
+    ChildProcess(#[from] ProcessError),
+
+    #[error("Failed to parse the CSV output of a child process")]
+    ChildProcessCsvOutput(#[from] csv::Error),
+}
 
 #[automock]
 pub trait IpNeighborScanner {
@@ -32,6 +47,7 @@ impl IpNeighborScanner for DummyIpNeighborScanner {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct IpNeighbor {
     pub address: Ipv6Addr,
     pub network_interface_index: u32,

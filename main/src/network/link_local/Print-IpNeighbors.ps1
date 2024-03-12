@@ -1,0 +1,1 @@
+Get-NetNeighbor -AddressFamily IPv6 | Select-Object -Property InterfaceIndex, IPAddress, State | ConvertTo-Csv

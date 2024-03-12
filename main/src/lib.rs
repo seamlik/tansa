@@ -31,6 +31,7 @@
 mod network;
 mod os;
 mod packet;
+mod process;
 mod response_collector;
 mod response_sender;
 mod scanner;
