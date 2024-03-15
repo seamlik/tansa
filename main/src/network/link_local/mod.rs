@@ -5,6 +5,17 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
 
+pub async fn ip_neighbor_scanner() -> Box<dyn IpNeighborScanner> {
+    match crate::os::detect_operating_system().await {
+        Ok(_) => Box::new(DummyIpNeighborScanner), // TODO
+        Err(e) => {
+            log::warn!("Failed to detect operating system: {}", e);
+            log::info!("Unknown operating system, disabling IP neighbor discovery.");
+            Box::new(DummyIpNeighborScanner)
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum IpNeighborScanError {}
 
@@ -13,7 +24,7 @@ pub trait IpNeighborScanner {
     fn scan(&self) -> BoxFuture<'static, Result<Vec<IpNeighbor>, IpNeighborScanError>>;
 }
 
-pub struct DummyIpNeighborScanner;
+struct DummyIpNeighborScanner;
 
 impl IpNeighborScanner for DummyIpNeighborScanner {
     fn scan(&self) -> BoxFuture<'static, Result<Vec<IpNeighbor>, IpNeighborScanError>> {

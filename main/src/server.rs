@@ -1,4 +1,3 @@
-use crate::network::link_local::DummyIpNeighborScanner;
 use crate::network::link_local::IpNeighbor;
 use crate::network::link_local::IpNeighborScanError;
 use crate::network::link_local::IpNeighborScanner;
@@ -39,7 +38,7 @@ pub async fn serve(discovery_port: u16, service_port: u16) -> Result<(), ServeEr
         TokioMulticastReceiver,
         GrpcResponseSender,
         TokioUdpSender,
-        Box::new(DummyIpNeighborScanner),
+        crate::network::link_local::ip_neighbor_scanner().await,
     )
     .await
 }

@@ -29,6 +29,7 @@
 //!   Usually contains the socket address accessible within the LAN you connect.
 
 mod network;
+mod os;
 mod packet;
 mod response_collector;
 mod response_sender;
