@@ -4,8 +4,7 @@ use futures_channel::mpsc::UnboundedSender;
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 use mockall::automock;
-use std::net::IpAddr;
-use std::net::SocketAddrV6;
+use std::net::SocketAddr;
 use tansa_protocol::response_collector_service_server::ResponseCollectorService;
 use tansa_protocol::response_collector_service_server::ResponseCollectorServiceServer;
 use tansa_protocol::Response;
@@ -87,20 +86,23 @@ impl ResponseCollectorService for ResponseCollectorServiceProvider {
             remote_address
         );
 
-        let remote_ip = match remote_address.map(|addr| addr.ip()) {
-            Some(IpAddr::V6(ip)) => ip,
-            Some(IpAddr::V4(_)) => return Err(Status::unimplemented("IPv4 unsupported")),
-            None => return Err(Status::unimplemented("IP unavailable")),
-        };
-        let remote_service_port = match request.service_port.try_into() {
+        let service_port = match request.service_port.try_into() {
             Ok(p) => p,
             Err(_) => return Err(Status::invalid_argument("Port out of range")),
         };
-        if remote_service_port == 0 {
+        if service_port == 0 {
             return Err(Status::invalid_argument("Port must not be 0"));
         }
+
+        let mut service_address = match remote_address {
+            Some(SocketAddr::V6(a)) => a,
+            Some(SocketAddr::V4(_)) => return Err(Status::unimplemented("IPv4 unsupported")),
+            None => return Err(Status::unimplemented("Remote address unavailable")),
+        };
+        service_address.set_port(service_port);
+
         let service = Service {
-            address: SocketAddrV6::new(remote_ip, remote_service_port, 0, 0),
+            address: service_address,
         };
         match self.response_sender.unbounded_send(service) {
             Ok(_) => Ok(tonic::Response::new(())),
@@ -117,7 +119,6 @@ mod test {
     use futures_util::TryStreamExt;
     use tonic::transport::server::TcpConnectInfo;
     use tonic::IntoRequest;
-    use tonic::Request;
 
     #[tokio::test]
     async fn response_collector_port_must_not_be_0() {
@@ -148,19 +149,17 @@ mod test {
     }
 
     #[tokio::test]
-    async fn ip_unavailable() {
+    async fn remote_address_unavailable() {
         crate::test::init();
 
         let provider = new_response_collector_service_provider();
+        let request = Response { service_port: 1 }.into_request();
 
         // When
-        let status = provider
-            .submit_response(Request::new(Default::default()))
-            .await
-            .unwrap_err();
+        let status = provider.submit_response(request).await.unwrap_err();
 
         // Then
-        assert_eq!(status.message(), "IP unavailable");
+        assert_eq!(status.message(), "Remote address unavailable");
     }
 
     #[tokio::test]
@@ -169,7 +168,7 @@ mod test {
 
         let provider = new_response_collector_service_provider();
 
-        let mut request = Response::default().into_request();
+        let mut request = Response { service_port: 1 }.into_request();
         let tcp_connect_info = TcpConnectInfo {
             local_addr: None,
             remote_addr: Some("1.1.1.1:1".parse().unwrap()),
