@@ -1,4 +1,4 @@
-use crate::network::multicast::TokioMulticastReceiver;
+use crate::network::udp_receiver::TokioUdpReceiver;
 use crate::network::udp_sender::TokioUdpSender;
 use crate::network::udp_sender::UdpSender;
 use crate::packet::DiscoveryPacketReceiver;
@@ -11,6 +11,7 @@ use futures_util::StreamExt;
 use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
 use prost::Message;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tansa_protocol::DiscoveryPacket;
@@ -27,7 +28,7 @@ pub struct Service {
 pub fn scan(discovery_port: u16) -> impl Stream<Item = Result<Service, ScanError>> {
     GrpcResponseCollector::new()
         .err_into()
-        .map_ok(move |c| scan_internal(discovery_port, c, TokioUdpSender, TokioMulticastReceiver))
+        .map_ok(move |c| scan_internal(discovery_port, c, TokioUdpSender, TokioUdpReceiver))
         .try_flatten_stream()
 }
 
@@ -35,19 +36,19 @@ fn scan_internal(
     discovery_port: u16,
     response_collector: impl ResponseCollector,
     udp_sender: impl UdpSender + Send + 'static,
-    multicast_receiver: impl DiscoveryPacketReceiver + Send + 'static,
+    udp_receiver: impl DiscoveryPacketReceiver + Send + 'static,
 ) -> BoxStream<'static, Result<Service, ScanError>> {
     if discovery_port == 0 {
         return futures_util::stream::once(async { Err(ScanError::InvalidDiscoveryPort) }).boxed();
     }
 
-    let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), discovery_port, 0, 0);
+    let discovery_ip = crate::get_discovery_ip();
     let request = Request {
         response_collector_port: response_collector.get_port().into(),
     };
     let services = futures_util::stream::select(
         response_collector.collect().map_err(Into::into),
-        receive_announcements(multicast_receiver, multicast_address),
+        receive_announcements(udp_receiver, discovery_ip, discovery_port),
     );
     crate::stream::join(send_requests(udp_sender, request, discovery_port), services).boxed()
 }
@@ -72,11 +73,12 @@ async fn send_requests(
 }
 
 fn receive_announcements(
-    multicast_receiver: impl DiscoveryPacketReceiver,
-    multicast_address: SocketAddrV6,
+    udp_receiver: impl DiscoveryPacketReceiver,
+    discovery_ip: Ipv6Addr,
+    discovery_port: u16,
 ) -> impl Stream<Item = Result<Service, ScanError>> {
-    multicast_receiver
-        .receive(multicast_address)
+    udp_receiver
+        .receive(discovery_ip, discovery_port)
         .err_into()
         .map_ok(|(packet, address)| {
             extract_service(packet, address)
@@ -144,7 +146,9 @@ mod test {
             futures_util::stream::once(async move { Ok((announcement, announcement_address)) })
                 .boxed();
 
-        let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), 10, 0, 0);
+        let discovery_ip = crate::get_discovery_ip();
+        let discovery_port = 10;
+        let multicast_address = SocketAddrV6::new(discovery_ip, discovery_port, 0, 0);
         let request = Request {
             response_collector_port: 100,
         };
@@ -167,18 +171,18 @@ mod test {
             .with(eq(multicast_address), eq(packet_bytes.clone()))
             .return_once(|_, _| async { Ok(()) }.boxed());
 
-        let mut multicast_receiver = MockDiscoveryPacketReceiver::default();
-        multicast_receiver
+        let mut udp_receiver = MockDiscoveryPacketReceiver::default();
+        udp_receiver
             .expect_receive()
-            .with(eq(multicast_address))
-            .return_once_st(move |_| discovery_packets);
+            .with(eq(discovery_ip), eq(discovery_port))
+            .return_once_st(move |_, _| discovery_packets);
 
         // When
         let actual_services: Vec<_> = scan_internal(
             multicast_address.port(),
             response_collector,
             udp_sender,
-            multicast_receiver,
+            udp_receiver,
         )
         .take(3)
         .try_collect()

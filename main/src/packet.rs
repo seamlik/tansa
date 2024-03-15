@@ -1,7 +1,8 @@
-use crate::network::multicast::MulticastReceiver;
+use crate::network::udp_receiver::UdpReceiver;
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 use mockall::automock;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tansa_protocol::DecodeError;
@@ -12,19 +13,21 @@ use tansa_protocol::ProtobufDecoder;
 pub trait DiscoveryPacketReceiver {
     fn receive(
         &self,
-        multicast_address: SocketAddrV6,
+        multicast_ip: Ipv6Addr,
+        port: u16,
     ) -> BoxStream<'static, std::io::Result<(DiscoveryPacket, SocketAddrV6)>>;
 }
 
 impl<T> DiscoveryPacketReceiver for T
 where
-    T: MulticastReceiver + Send,
+    T: UdpReceiver + Send,
 {
     fn receive(
         &self,
-        multicast_address: SocketAddrV6,
+        multicast_ip: Ipv6Addr,
+        port: u16,
     ) -> BoxStream<'static, std::io::Result<(DiscoveryPacket, SocketAddrV6)>> {
-        self.receive(multicast_address, ProtobufDecoder::default())
+        self.receive(multicast_ip, port, ProtobufDecoder::default())
             .filter_map(|r| async { strip_protobuf_error(r) })
             .filter_map(|r| async { extract_ipv6(r) })
             .boxed()
