@@ -1,6 +1,6 @@
-use crate::network::link_local::IpNeighbor;
-use crate::network::link_local::IpNeighborScanError;
-use crate::network::link_local::IpNeighborScanner;
+use crate::network::ip_neighbor::IpNeighbor;
+use crate::network::ip_neighbor::IpNeighborScanError;
+use crate::network::ip_neighbor::IpNeighborScanner;
 use crate::network::udp_receiver::TokioUdpReceiver;
 use crate::network::udp_sender::TokioUdpSender;
 use crate::network::udp_sender::UdpSender;
@@ -38,7 +38,7 @@ pub async fn serve(discovery_port: u16, service_port: u16) -> Result<(), ServeEr
         TokioUdpReceiver,
         GrpcResponseSender,
         TokioUdpSender,
-        crate::network::link_local::ip_neighbor_scanner().await,
+        crate::network::ip_neighbor::ip_neighbor_scanner().await,
     )
     .await
 }
@@ -161,7 +161,7 @@ fn get_response_collector_address(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::network::link_local::MockIpNeighborScanner;
+    use crate::network::ip_neighbor::MockIpNeighborScanner;
     use crate::network::udp_sender::MockUdpSender;
     use crate::packet::MockDiscoveryPacketReceiver;
     use crate::response_sender::MockResponseSender;
