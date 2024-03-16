@@ -2,6 +2,7 @@ use std::process::Stdio;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+use tokio::process::Child;
 use tokio::process::Command;
 
 pub async fn eval(command: &str, args: &[&str], stdin: &[u8]) -> Result<Vec<u8>, ProcessError> {
@@ -23,14 +24,22 @@ pub async fn eval(command: &str, args: &[&str], stdin: &[u8]) -> Result<Vec<u8>,
         return Err(ProcessError::ExternalCommand);
     }
 
-    let mut stdout = process
-        .stdout
-        .take()
-        .ok_or_else(|| ProcessError::StdioRedirection)?;
+    read_stdout(&mut process).await
+}
 
-    let mut buffer = Default::default();
-    stdout.read_to_end(&mut buffer).await?;
-    Ok(buffer)
+pub async fn run(command: &str, args: &[&str]) -> Result<Vec<u8>, ProcessError> {
+    let mut process = Command::new(command)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()?;
+
+    if !process.wait().await?.success() {
+        return Err(ProcessError::ExternalCommand);
+    }
+
+    read_stdout(&mut process).await
 }
 
 pub async fn probe(command: &str, args: &[&str]) -> bool {
@@ -60,6 +69,17 @@ pub async fn probe(command: &str, args: &[&str]) -> bool {
         log::debug!("Command {} exited with failure", command);
         false
     }
+}
+
+async fn read_stdout(process: &mut Child) -> Result<Vec<u8>, ProcessError> {
+    let mut stdout = process
+        .stdout
+        .take()
+        .ok_or_else(|| ProcessError::StdioRedirection)?;
+
+    let mut buffer = Default::default();
+    stdout.read_to_end(&mut buffer).await?;
+    Ok(buffer)
 }
 
 #[derive(Error, Debug)]

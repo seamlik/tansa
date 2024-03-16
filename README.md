@@ -28,6 +28,7 @@ In this case, no other device exists within the LAN, but applications on the sma
 This feature relies on the operating system. Current we support these operating systems:
 
 - Windows (using [PowerShell](https://learn.microsoft.com/powershell/module/nettcpip/get-netneighbor?view=windowsserver2022-ps))
+- Linux (using [iproute2](https://wiki.linuxfoundation.org/networking/iproute2))
 
 ## Project name meaning
 

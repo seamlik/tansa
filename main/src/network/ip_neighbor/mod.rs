@@ -1,5 +1,7 @@
+mod linux;
 mod windows;
 
+use self::linux::IpRoute2IpNeighborScanner;
 use self::windows::PowerShellIpNeighborScanner;
 use crate::process::ProcessError;
 use futures_util::future::BoxFuture;
@@ -11,8 +13,10 @@ use std::net::SocketAddrV6;
 use thiserror::Error;
 
 pub async fn ip_neighbor_scanner() -> Box<dyn IpNeighborScanner + Send> {
-    let scanners: Vec<Box<dyn IpNeighborScanner + Send>> =
-        vec![Box::new(PowerShellIpNeighborScanner)];
+    let scanners: Vec<Box<dyn IpNeighborScanner + Send>> = vec![
+        Box::new(PowerShellIpNeighborScanner),
+        Box::new(IpRoute2IpNeighborScanner),
+    ];
     if let Some(supported_scanner) = futures_util::stream::iter(scanners)
         .filter(|s| s.supports_current_operating_system())
         .next()
@@ -31,7 +35,10 @@ pub enum IpNeighborScanError {
     ChildProcess(#[from] ProcessError),
 
     #[error("Failed to parse the CSV output of a child process")]
-    ChildProcessCsvOutput(#[from] csv::Error),
+    ParseCsv(#[from] csv::Error),
+
+    #[error("Failed to parse the JSON output of a child process")]
+    ParseJson(#[from] serde_json::Error),
 }
 
 #[automock]

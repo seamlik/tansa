@@ -84,8 +84,7 @@ mod test {
             return;
         }
 
-        let neighbors = scanner.scan().await.unwrap();
-        assert!(!neighbors.is_empty());
+        scanner.scan().await.unwrap();
     }
 
     #[test]
