@@ -110,6 +110,7 @@ async fn announce_to_ip_neighbors(
     let tasks = neighbors
         .into_iter()
         .map(|n| n.get_socket_address(discovery_port))
+        .inspect(|a| log::debug!("Sending announcement to {}", a))
         .map(|a| udp_sender.send_unicast(a, data.clone()));
     futures_util::future::try_join_all(tasks)
         .map_ok(|_| ())
@@ -187,11 +188,11 @@ mod test {
         let multicast_address = SocketAddrV6::new(crate::get_discovery_ip(), DISCOVERY_PORT, 0, 0);
         let ip_neighbors = vec![
             IpNeighbor {
-                address: "::A".parse().unwrap(),
+                address: "FE80::A".parse().unwrap(),
                 network_interface_index: 1000,
             },
             IpNeighbor {
-                address: "::B".parse().unwrap(),
+                address: "2001::B".parse().unwrap(),
                 network_interface_index: 1001,
             },
         ];
@@ -224,14 +225,14 @@ mod test {
         udp_sender
             .expect_send_unicast()
             .with(
-                eq("[::A%1000]:50000".parse::<SocketAddrV6>().unwrap()),
+                eq("[FE80::A%1000]:50000".parse::<SocketAddrV6>().unwrap()),
                 eq(response_bytes.clone()),
             )
             .return_once(|_, _| async { Ok(()) }.boxed());
         udp_sender
             .expect_send_unicast()
             .with(
-                eq("[::B%1001]:50000".parse::<SocketAddrV6>().unwrap()),
+                eq("[2001::B]:50000".parse::<SocketAddrV6>().unwrap()),
                 eq(response_bytes.clone()),
             )
             .return_once(|_, _| async { Ok(()) }.boxed());

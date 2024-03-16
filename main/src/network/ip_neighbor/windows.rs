@@ -31,7 +31,7 @@ impl PowerShellIpNeighborScanner {
         let neighbors: Vec<_> = neighbors
             .into_iter()
             .filter(|n| n.State != "Unreachable")
-            .filter(|n| n.IPAddress.segments().starts_with(&[0xFE80, 0, 0, 0]))
+            .filter(|n| super::is_valid_ip(n.IPAddress))
             .map(Into::into)
             .collect();
         neighbors

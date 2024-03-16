@@ -40,7 +40,7 @@ impl IpRoute2IpNeighborScanner {
         let neighbors: Vec<_> = neighbors
             .into_iter()
             .filter(|n| n.state != "FAILED")
-            .filter(|n| n.ip.segments().starts_with(&[0xFE80, 0, 0, 0]))
+            .filter(|n| super::is_valid_ip(n.ip))
             .filter_map(|n| {
                 links.get(&n.ifname).map(|l| IpNeighbor {
                     address: n.ip,
@@ -109,7 +109,7 @@ mod test {
 fe80::1:abcd dev wlan0 lladdr 00:00:00:00:00:01 router REACHABLE
 fe80::2:abcd dev eth0 lladdr 00:00:00:00:00:02 router STALE
 fe80::3:abcd dev wlan2 lladdr 00:00:00:00:00:03 router STALE
-fe02::4:abcd dev wlan0 lladdr 00:00:00:00:00:04 router REACHABLE
+ff02::4:abcd dev wlan0 lladdr 00:00:00:00:00:04 router REACHABLE
 fe80::5:abcd dev wlan0 lladdr 00:00:00:00:00:05 router FAILED
         "#
         .trim();

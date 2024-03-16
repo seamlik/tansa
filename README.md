@@ -20,12 +20,12 @@ Service discovery is mostly implemented by exchanging multicast packets on a ren
 
 When multicast is unavailable, services on other devices are naturally undiscoverable.
 However, devices connected directly to the host device are still discoverable as IP neighbors.
-Applications can still communicate with each other but over link-local addresses.
 
 This scenario can happen, for example, when 2 Android smartphones are connected via a hotspot or even Wi-Fi Direct.
 In this case, no other device exists within the LAN, but applications on the smartphones can still communicate.
 
-This feature relies on the operating system. Current we support these operating systems:
+This feature relies on the operating system.
+Current we support these operating systems:
 
 - Windows (using [PowerShell](https://learn.microsoft.com/powershell/module/nettcpip/get-netneighbor?view=windowsserver2022-ps))
 - Linux (using [iproute2](https://wiki.linuxfoundation.org/networking/iproute2))

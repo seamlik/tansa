@@ -29,6 +29,10 @@ pub async fn ip_neighbor_scanner() -> Box<dyn IpNeighborScanner + Send> {
     }
 }
 
+fn is_valid_ip(ip: Ipv6Addr) -> bool {
+    !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast()
+}
+
 #[derive(Error, Debug)]
 pub enum IpNeighborScanError {
     #[error("Failed in running an external command")]
@@ -67,7 +71,16 @@ pub struct IpNeighbor {
 
 impl IpNeighbor {
     pub fn get_socket_address(&self, port: u16) -> SocketAddrV6 {
-        SocketAddrV6::new(self.address, port, 0, self.network_interface_index)
+        let scope = if self.is_link_local() {
+            self.network_interface_index
+        } else {
+            0
+        };
+        SocketAddrV6::new(self.address, port, 0, scope)
+    }
+
+    fn is_link_local(&self) -> bool {
+        self.address.octets().starts_with(&[0xFE, 0x80])
     }
 }
 
@@ -78,5 +91,37 @@ mod test {
     #[tokio::test]
     async fn find_scanner() {
         ip_neighbor_scanner().await.scan().await.unwrap();
+    }
+
+    #[test]
+    fn get_socket_address_unicast() {
+        let neighbor = IpNeighbor {
+            address: "2001::1".parse().unwrap(),
+            network_interface_index: 123,
+        };
+        let port = 10;
+        let expected_address: SocketAddrV6 = "[2001::1]:10".parse().unwrap();
+
+        // When
+        let actual_address = neighbor.get_socket_address(port);
+
+        // Then
+        assert_eq!(actual_address, expected_address);
+    }
+
+    #[test]
+    fn get_socket_address_link_local() {
+        let neighbor = IpNeighbor {
+            address: "FE80::1".parse().unwrap(),
+            network_interface_index: 123,
+        };
+        let port = 10;
+        let expected_address: SocketAddrV6 = "[FE80::1%123]:10".parse().unwrap();
+
+        // When
+        let actual_address = neighbor.get_socket_address(port);
+
+        // Then
+        assert_eq!(actual_address, expected_address);
     }
 }
