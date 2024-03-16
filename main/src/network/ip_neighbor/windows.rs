@@ -13,7 +13,7 @@ impl PowerShellIpNeighborScanner {
     async fn scan() -> Result<Vec<IpNeighbor>, IpNeighborScanError> {
         let stdout = crate::process::eval(
             "pwsh",
-            &["-NonInteractive", "-Command", "-"],
+            &["-Command", "-"],
             include_bytes!("./Print-IpNeighbors.ps1"),
         )
         .await?;
@@ -43,6 +43,10 @@ impl PowerShellIpNeighborScanner {
 }
 
 impl IpNeighborScanner for PowerShellIpNeighborScanner {
+    fn supports_current_operating_system(&self) -> BoxFuture<'static, bool> {
+        crate::process::probe("pwsh", &["-Command", "Get-Command Get-NetNeighbor"]).boxed()
+    }
+
     fn scan(&self) -> BoxFuture<'static, Result<Vec<IpNeighbor>, IpNeighborScanError>> {
         Self::scan().boxed()
     }
@@ -68,18 +72,19 @@ impl From<NetNeighbor> for IpNeighbor {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::os::OperatingSystem;
 
     #[tokio::test]
     async fn scan() {
         crate::test::init();
 
-        if crate::os::detect_operating_system().await.unwrap() != OperatingSystem::Windows {
-            println!("Operating system is not Windows, skipping.");
+        let scanner = PowerShellIpNeighborScanner;
+
+        if !scanner.supports_current_operating_system().await {
+            println!("PowerShell does not exist, skipping.");
             return;
         }
 
-        let neighbors = PowerShellIpNeighborScanner.scan().await.unwrap();
+        let neighbors = scanner.scan().await.unwrap();
         assert!(!neighbors.is_empty());
     }
 
