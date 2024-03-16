@@ -6,4 +6,4 @@ resolver = "2"
 edition = "2021"
 publish = false
 repository = "https://github.com/seamlik/tansa"
-version = "0.1.0"
+version = "1.0.0"
