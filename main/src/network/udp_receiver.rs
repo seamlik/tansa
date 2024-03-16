@@ -28,7 +28,7 @@ impl TokioUdpReceiver {
         decoder: C,
     ) -> std::io::Result<UdpFramed<C>> {
         let bind_address = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0);
-        log::info!("Binding `MulticastReceiver` socket at {}", bind_address);
+        log::info!("Binding `UdpReceiver` socket at {}", bind_address);
         let socket = UdpSocket::bind(bind_address).await?;
         socket.join_multicast_v6(&multicast_ip, 0)?;
 
