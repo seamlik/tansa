@@ -10,7 +10,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
 
-pub async fn ip_neighbor_scanner() -> Box<dyn IpNeighborScanner> {
+pub async fn ip_neighbor_scanner() -> Box<dyn IpNeighborScanner + Send> {
     match crate::os::detect_operating_system().await {
         Ok(OperatingSystem::Windows) => Box::new(PowerShellIpNeighborScanner),
         Ok(_) => {
