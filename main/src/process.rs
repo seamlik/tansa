@@ -8,6 +8,7 @@ use tokio::process::Command;
 pub async fn eval(command: &str, args: &[&str], stdin: &[u8]) -> Result<Vec<u8>, ProcessError> {
     let mut process = Command::new(command)
         .args(args)
+        .env("NO_COLOR", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -16,7 +17,7 @@ pub async fn eval(command: &str, args: &[&str], stdin: &[u8]) -> Result<Vec<u8>,
     let mut stdin_pipe = process
         .stdin
         .take()
-        .ok_or_else(|| ProcessError::StdioRedirection)?;
+        .ok_or_else(|| ProcessError::RedirectStdIo)?;
     stdin_pipe.write_all(stdin).await?;
     drop(stdin_pipe);
 
@@ -30,6 +31,7 @@ pub async fn eval(command: &str, args: &[&str], stdin: &[u8]) -> Result<Vec<u8>,
 pub async fn run(command: &str, args: &[&str]) -> Result<Vec<u8>, ProcessError> {
     let mut process = Command::new(command)
         .args(args)
+        .env("NO_COLOR", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -75,7 +77,7 @@ async fn read_stdout(process: &mut Child) -> Result<Vec<u8>, ProcessError> {
     let mut stdout = process
         .stdout
         .take()
-        .ok_or_else(|| ProcessError::StdioRedirection)?;
+        .ok_or_else(|| ProcessError::RedirectStdIo)?;
 
     let mut buffer = Default::default();
     stdout.read_to_end(&mut buffer).await?;
@@ -88,7 +90,7 @@ pub enum ProcessError {
     ChildProcessCreation(#[from] std::io::Error),
 
     #[error("Failed to redirect standard I/O")]
-    StdioRedirection,
+    RedirectStdIo,
 
     #[error("External command failed")]
     ExternalCommand,
@@ -97,7 +99,65 @@ pub enum ProcessError {
 #[cfg(test)]
 mod test {
     #[tokio::test]
+    async fn eval() {
+        crate::test::init();
+
+        let output = super::eval("pwsh", &["-Command", "-"], b"Write-Output 123")
+            .await
+            .unwrap();
+        let output_text = String::from_utf8(output).unwrap();
+        assert_eq!(output_text.trim(), "123");
+    }
+
+    #[tokio::test]
+    async fn eval_failure() {
+        crate::test::init();
+
+        let e = super::eval("pwsh", &["-Command", "-"], b"Some-Unknown-Command")
+            .await
+            .unwrap_err();
+        assert_eq!(e.to_string(), "External command failed");
+    }
+
+    #[tokio::test]
+    async fn run() {
+        crate::test::init();
+
+        let output = super::run("pwsh", &["-Command", "Write-Output 123"])
+            .await
+            .unwrap();
+        let output_text = String::from_utf8(output).unwrap();
+        assert_eq!(output_text.trim(), "123");
+    }
+
+    #[tokio::test]
+    async fn run_failure() {
+        crate::test::init();
+
+        let e = super::run("pwsh", &["-Command", "Some-Unknown-Command"])
+            .await
+            .unwrap_err();
+        assert_eq!(e.to_string(), "External command failed");
+    }
+
+    #[tokio::test]
     async fn probe() {
+        crate::test::init();
+
         assert!(super::probe("pwsh", &["-Help"]).await);
+    }
+
+    #[tokio::test]
+    async fn probe_non_existing_command() {
+        crate::test::init();
+
+        assert!(!super::probe("__some_unknown_command__", &["--version"]).await);
+    }
+
+    #[tokio::test]
+    async fn probe_invalid_argument() {
+        crate::test::init();
+
+        assert!(!super::probe("pwsh", &["--some-invalid-argument"]).await);
     }
 }
