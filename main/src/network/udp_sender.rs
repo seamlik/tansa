@@ -63,3 +63,31 @@ impl UdpSender for TokioUdpSender {
         Self::send_unicast(unicast_address, data).boxed()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::net::Ipv6Addr;
+
+    #[tokio::test]
+    async fn send_multicast() {
+        crate::test::init();
+
+        let address = SocketAddrV6::new(crate::get_discovery_ip(), 1, 0, 0);
+        TokioUdpSender
+            .send_multicast(address, Arc::new([1]))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_unicast() {
+        crate::test::init();
+
+        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0);
+        TokioUdpSender
+            .send_unicast(address, Arc::new([1]))
+            .await
+            .unwrap();
+    }
+}
